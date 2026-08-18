@@ -301,6 +301,9 @@ def build_table_bundle(items_meta):
                 "valid": len(today_avgs),
             }
         last_avg = vals[-1] if vals else None          # 前一天日均价(区间筛选用)
+        today_chg = None
+        if today_entry and today_entry.get("avg") is not None and last_avg:
+            today_chg = (today_entry["avg"] - last_avg) / last_avg   # 当日波幅:当日均价 vs 前一日日均价
         values = vals + ([today_entry["avg"]] if today_entry else [])
         if not values:
             continue
@@ -337,6 +340,7 @@ def build_table_bundle(items_meta):
             "category": meta.get("category") or "other",
             "today": today_entry,
             "last_avg": _r2(last_avg),
+            "today_chg": _r4(today_chg),
             "ma3": _r2(ma3), "std3": _r2(std3), "chg3": _r4(_chg(3)),
             "ma7": _r2(ma7), "std7": _r2(std7), "chg7": _r4(_chg(7)),
             "ma14": _r2(ma14), "std14": _r2(std14), "chg14": _r4(_chg(14)),
