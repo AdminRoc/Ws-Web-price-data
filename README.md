@@ -6,8 +6,8 @@
 
 | 工作流 | 触发 | 产物 |
 |---|---|---|
-| `fetch-snapshots.yml` | 每 2h(UTC 第 15 分)+ 手动 | `data/snapshots/YYYY-MM-DD.json`(当日快照批次)+ `data/meta/items.json` |
-| `aggregate-daily.yml`(Phase 2) | 每日 00:15 UTC+8 + 手动 | `data/daily/`(日均价,滚动 1000 天)、`data/series/`、`data/table/`、`data/meta/` |
+| `fetch-snapshots.yml` | 每 2h(UTC 第 15 分)+ 手动 | 快照批次 + **日均价聚合(幂等)** + 表格 bundle + meta,一次提交完成 |
+| — | 聚合语义 | 目标日 = 前一日(UTC+8);`data/daily/`(日均价,滚动 1000 天)、`data/series/`、`data/table/`、`data/meta/` |
 
 ## 目录结构
 

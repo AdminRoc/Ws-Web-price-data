@@ -1,10 +1,12 @@
-name: 抓取全量均价快照
+name: 抓取快照并聚合日均价
 
-# 每 2 小时(UTC 第 15 分)从 WM v2 API 抓取全量均价快照,追加进当日批次文件。
-# 产物:
-#   data/snapshots/YYYY-MM-DD.json  — 当日快照批次(UTC+8 日期键,时间戳存 UTC)
-#   data/meta/items.json           — 物品清单(名称/中文名/类别)
-# 提交到 main 后,站点(Ws-Web-price)经 jsDelivr 多源引用。
+# 每 2 小时(UTC 第 15 分)运行一次:
+#   1) 抓取全量均价快照 → 追加进当日批次文件 data/snapshots/YYYY-MM-DD.json
+#   2) 聚合前一日(UTC+8)日均价 → data/daily/ + data/series/(幂等,每天只会真正聚合一次)
+#   3) 重建表格 bundle(data/table/latest.json,含今日临时均价与预测)+ meta
+#   4) 清理过期文件(snapshots 7 天 / daily+series 1000 天)
+#   5) 有变动提交;jsDelivr purge 立即生效
+# 站点(Ws-Web-price)经 jsDelivr 多源引用。
 
 on:
   workflow_dispatch:
@@ -12,12 +14,13 @@ on:
     - cron: '15 */2 * * *'   # 每 2 小时第 15 分(UTC);脚本内另有 0~3min 随机延迟错峰
 
 concurrency:
-  group: fetch-snapshots
+  group: price-data
   cancel-in-progress: true   # 上一轮未跑完时直接取消,避免积压排队
 
 jobs:
   fetch:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     permissions:
       contents: write
     steps:
@@ -34,6 +37,11 @@ jobs:
         env:
           DATA_DIR: data
 
+      - name: 聚合日均价并重建 bundle(幂等)
+        run: python3 scripts/aggregate_daily.py
+        env:
+          DATA_DIR: data
+
       - name: 提交并推送
         id: commit
         run: |
@@ -45,7 +53,7 @@ jobs:
             echo "changed=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          git commit -m "data: 均价快照批次 [skip ci]"
+          git commit -m "data: 均价快照批次 + 日均价聚合 [skip ci]"
           for i in 1 2 3 4 5; do
             if git push; then
               echo "changed=true" >> "$GITHUB_OUTPUT"
@@ -59,16 +67,23 @@ jobs:
             rm -rf data && mkdir -p data
             cp -r /tmp/data_bak/* data/ 2>/dev/null || true
             git add data/
-            git commit -m "data: 均价快照批次 [skip ci]"
+            git commit -m "data: 均价快照批次 + 日均价聚合 [skip ci]"
             sleep "$(( (RANDOM % 4) + 2 ))"
           done
           exit 1
 
       # jsDelivr 的 @main 跟随最新 commit,但 CDN 缓存有延迟;提交后主动 purge 立即生效。
-      # 注意:快照文件名按 UTC+8 日期键命名,purge 时也要按 UTC+8 计算当日。
-      - name: 刷新 jsDelivr 缓存(快照)
+      # 注意:快照/日均价文件名按 UTC+8 日期键命名,purge 时也要按 UTC+8 计算。
+      - name: 刷新 jsDelivr 缓存(热点文件)
         if: steps.commit.outputs.changed == 'true'
         run: |
           CN_DATE=$(TZ='Asia/Shanghai' date +%Y-%m-%d)
-          curl -s "https://purge.jsdelivr.net/gh/AdminRoc/Ws-Web-price-data@main/data/snapshots/${CN_DATE}.json" || true
-          curl -s "https://purge.jsdelivr.net/gh/AdminRoc/Ws-Web-price-data@main/data/meta/items.json" || true
+          CN_YDAY=$(TZ='Asia/Shanghai' date -d 'yesterday' +%Y-%m-%d)
+          for f in \
+            "data/meta/items.json" \
+            "data/meta/latest.json" \
+            "data/table/latest.json" \
+            "data/snapshots/${CN_DATE}.json" \
+            "data/daily/${CN_YDAY}.json" ; do
+            curl -s "https://purge.jsdelivr.net/gh/AdminRoc/Ws-Web-price-data@main/${f}" || true
+          done

@@ -13,6 +13,13 @@
       { date, tz, generated, batches: [ { time, items: { slug: {avg,count,used,special} } } ] }
   - data/meta/items.json —— 物品清单(名称/中文名/类别 tags),供站点搜索与筛选
 
+抗劣化设计(2026-08-19 实测 WM 间歇性慢响应后加固):
+  - Retry-After 优先(429/509 按响应头等待);
+  - 退避封顶 30s;单物品最多 4 次尝试;
+  - 自适应限速:滚动窗口失败率 >50% 时自动加大请求间隔,恢复后回落;
+  - 总时间预算 RUN_TIME_BUDGET:到期中断本批,提交已抓到的部分批次(宁可部分,不可空跑);
+  - 未抓到的物品不写入批次(由聚合侧按实际样本统计)。
+
 时区(用户要求精准换算):
   - 时间戳一律存 UTC ISO 8601;
   - 日期键按 UTC+8(Asia/Shanghai,无夏令时,恒 +8h)换算 —— 用固定 offset,不依赖 tzdata。
@@ -27,25 +34,28 @@ import os
 import random
 import sys
 import time
+from collections import deque
 from datetime import datetime, timezone, timedelta
 
 import aiohttp
 
 DIRECT_URL = "https://api.warframe.market"
 
-# 速率策略(每 2h 一次全量,须在 30 分钟内完成):
-# 并发 12 + 0.4~1.0s 随机间隔 ≈ 12~20 req/s;每 50 个 slug 额外休息 2~5s
+# 速率策略:并发 12 + 0.4~1.0s 随机间隔(自适应可调);每 50 个 slug 额外休息 2~5s
 CONCURRENCY = 12
 MIN_DELAY = 0.4
 MAX_DELAY = 1.0
-STARTUP_JITTER_MAX = 180  # 3min,错峰,不破坏 2h 节奏
+STARTUP_JITTER_MAX = 180  # 3min,错峰
 BATCH_SIZE = 50
 BATCH_PAUSE_MIN = 2
 BATCH_PAUSE_MAX = 5
-MAX_RETRIES = 5       # 单物品重试次数(429/509/5xx/网络错误)
-RETRY_ROUNDS = 2      # 主循环后对失败 slug 的补跑轮数
+MAX_RETRIES = 4          # 单物品尝试次数(含首次)
+BACKOFF_CAP = 30         # 秒,指数退避封顶
+RETRY_ROUNDS = 2         # 主循环后对失败 slug 的补跑轮数
+RUN_TIME_BUDGET = 1800   # 秒(30min),到期中断并提交部分批次
 ITEMS_TIMEOUT = 30
 ITEMS_RETRIES = 5
+PROGRESS_EVERY = 300
 
 DATA_DIR = os.environ.get("DATA_DIR", "data")
 SNAPSHOTS_DIR = os.path.join(DATA_DIR, "snapshots")
@@ -65,6 +75,28 @@ HEADERS = {
 }
 
 
+class Throttle:
+    """自适应限速:滚动窗口统计失败率,失败率高时加大请求间隔,恢复后回落。"""
+
+    def __init__(self, min_delay, max_delay):
+        self.min_delay = min_delay
+        self.max_delay = max_delay
+        self.cur_delay = max_delay
+        self.window = deque(maxlen=60)
+
+    def record(self, ok):
+        self.window.append(1 if ok else 0)
+        if len(self.window) >= 20:
+            rate = sum(self.window) / len(self.window)
+            if rate < 0.5:
+                self.cur_delay = min(3.0, self.cur_delay + 0.3)
+            elif rate > 0.85:
+                self.cur_delay = max(self.min_delay, self.cur_delay - 0.2)
+
+    def jitter(self):
+        return self.cur_delay + random.random() * (self.max_delay - self.min_delay)
+
+
 def _utc_now_iso():
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -73,12 +105,15 @@ def _cn_date():
     return datetime.now(TZ_CN).strftime("%Y-%m-%d")
 
 
-def _jitter():
-    return MIN_DELAY + random.random() * (MAX_DELAY - MIN_DELAY)
-
-
-def _backoff(attempt):
-    return min((2 ** attempt) * 5, 120) + random.random() * 5
+def _backoff(attempt, resp=None):
+    if resp is not None:
+        try:
+            ra = int(resp.headers.get("Retry-After", "0"))
+            if ra > 0:
+                return min(ra + random.random() * 2, 120)
+        except Exception:
+            pass
+    return min((2 ** attempt) * 5, BACKOFF_CAP) + random.random() * 2
 
 
 def calc_avg(orders):
@@ -143,8 +178,8 @@ async def fetch_items(session):
     raise last
 
 
-async def fetch_slug(session, sem, slug):
-    """单物品抓取:返回 (slug, calc_avg结果) 或 (slug, "ERROR")。"""
+async def fetch_slug(session, sem, slug, throttle):
+    """单物品抓取:返回 (slug, calc_avg结果) / (slug, "ERROR") / (slug, "SKIPPED")。"""
     url = f"{DIRECT_URL}/v2/orders/item/{slug}"
     async with sem:
         for attempt in range(MAX_RETRIES):
@@ -152,40 +187,59 @@ async def fetch_slug(session, sem, slug):
                 async with session.get(url, headers=HEADERS,
                                        timeout=aiohttp.ClientTimeout(total=20)) as r:
                     if r.status in (429, 509):
-                        await asyncio.sleep(_backoff(attempt))
+                        throttle.record(False)
+                        await asyncio.sleep(_backoff(attempt, r))
                         continue
                     if r.status != 200:
+                        throttle.record(False)
                         if attempt < MAX_RETRIES - 1:
                             await asyncio.sleep(1 + random.random())
                             continue
                         return slug, "ERROR"
                     data = await r.json(content_type=None)
                     orders = data.get("data") or []
-                    await asyncio.sleep(_jitter())
+                    throttle.record(True)
+                    await asyncio.sleep(throttle.jitter())
                     return slug, calc_avg(orders)
             except Exception:
+                throttle.record(False)
                 await asyncio.sleep(0.5 + random.random())
     return slug, "ERROR"
 
 
-async def run_pass(session, sem, tasks, results, failed, round_no):
+async def run_pass(session, sem, tasks, results, failed, round_no, throttle, t0):
+    """执行一轮抓取;round_no=0 全量,round_no>=1 只处理 failed。
+    总时间预算到期时中断剩余任务,返回已完成的(部分批次)。"""
     pending = tasks if round_no == 0 else list(failed)
     if not pending:
-        return
-    coros = [fetch_slug(session, sem, slug) for slug in pending]
+        return False
+    coros = [fetch_slug(session, sem, slug, throttle) for slug in pending]
     done = 0
     failed.clear()
+    timed_out = False
     for coro in asyncio.as_completed(coros):
+        if time.time() - t0 > RUN_TIME_BUDGET:
+            timed_out = True
+            break
         slug, result = await coro
         done += 1
         if result == "ERROR":
             failed.add(slug)
             continue
         results[slug] = result
+        if done % PROGRESS_EVERY == 0:
+            elapsed = time.time() - t0
+            print(f"  [进度 {done}/{len(pending)}] 耗时 {elapsed/60:.1f} 分钟,"
+                  f"失败 {len(failed)},当前间隔 {throttle.cur_delay:.2f}s", flush=True)
         if done % BATCH_SIZE == 0 and done < len(pending):
             await asyncio.sleep(BATCH_PAUSE_MIN + random.random() * (BATCH_PAUSE_MAX - BATCH_PAUSE_MIN))
-    print(f"  第{round_no}轮完成:成功 {len(pending) - len(failed)},失败 {len(failed)}"
-          + (f",补跑剩余 {len(failed)}" if failed else ""))
+    if timed_out:
+        for c in coros:
+            c.cancel()
+        print(f"  ⏰ 超过 {RUN_TIME_BUDGET/60:.0f} 分钟预算,中断本轮,提交部分批次", flush=True)
+    print(f"  第{round_no}轮:完成 {done},失败 {len(failed)}"
+          + (f",补跑剩余 {len(failed)}" if failed else ""), flush=True)
+    return timed_out
 
 
 def append_snapshot(date, batch_items, generated):
@@ -207,7 +261,7 @@ def append_snapshot(date, batch_items, generated):
     data["batches"] = batches
     with open(snap_path, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, separators=(",", ":"))
-    print(f"  已追加批次 → {snap_path} (共 {len(batches)} 个批次,{len(batch_items)} 物品)")
+    print(f"  已追加批次 → {snap_path} (共 {len(batches)} 个批次,{len(batch_items)} 物品)", flush=True)
 
 
 def write_items_manifest(items_meta):
@@ -219,39 +273,45 @@ def write_items_manifest(items_meta):
     }
     with open(ITEMS_OUT, "w", encoding="utf-8") as f:
         json.dump(manifest, f, ensure_ascii=False, separators=(",", ":"))
-    print(f"  已写入物品清单 → {ITEMS_OUT} ({len(items_meta)} 物品)")
+    print(f"  已写入物品清单 → {ITEMS_OUT} ({len(items_meta)} 物品)", flush=True)
 
 
 async def main():
     if MAX_ITEMS <= 0:
         startup = random.randint(0, STARTUP_JITTER_MAX)
         if startup > 0:
-            print(f"启动随机延迟 {startup / 60:.1f} 分钟,避免固定时刻脉冲...")
+            print(f"启动随机延迟 {startup / 60:.1f} 分钟,避免固定时刻脉冲...", flush=True)
             await asyncio.sleep(startup)
     else:
-        print(f"[冒烟测试] MAX_ITEMS={MAX_ITEMS}")
+        print(f"[冒烟测试] MAX_ITEMS={MAX_ITEMS}", flush=True)
 
-    print("正在获取全量物品列表...")
-    async with aiohttp.ClientSession() as session:
+    print("正在获取全量物品列表...", flush=True)
+    async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(
+            limit=CONCURRENCY, limit_per_host=CONCURRENCY, ttl_dns_cache=300)) as session:
         items_data = await fetch_items(session)
 
     items = [it for it in (items_data.get("data") or []) if it.get("slug")]
     if MAX_ITEMS > 0:
         items = items[:MAX_ITEMS]
     slugs = [it["slug"] for it in items]
-    print(f"共 {len(slugs)} 个物品,并发={CONCURRENCY}")
+    print(f"共 {len(slugs)} 个物品,并发={CONCURRENCY},预算 {RUN_TIME_BUDGET/60:.0f} 分钟", flush=True)
 
     results = {}
     failed = set()
     sem = asyncio.Semaphore(CONCURRENCY)
+    throttle = Throttle(MIN_DELAY, MAX_DELAY)
     t0 = time.time()
 
-    async with aiohttp.ClientSession() as session:
-        await run_pass(session, sem, slugs, results, failed, 0)
-        for rnd in range(1, RETRY_ROUNDS + 1):
-            if not failed:
-                break
-            await run_pass(session, sem, slugs, results, failed, rnd)
+    async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(
+            limit=CONCURRENCY, limit_per_host=CONCURRENCY, ttl_dns_cache=300)) as session:
+        timed_out = await run_pass(session, sem, slugs, results, failed, 0, throttle, t0)
+        if not timed_out:
+            for rnd in range(1, RETRY_ROUNDS + 1):
+                if not failed:
+                    break
+                timed_out = await run_pass(session, sem, slugs, results, failed, rnd, throttle, t0)
+                if timed_out:
+                    break
 
     # 补跑仍失败:保留为 avg:null(聚合侧跳过),保证结构完整
     for slug in failed:
@@ -259,7 +319,7 @@ async def main():
 
     has_avg = sum(1 for v in results.values() if v.get("avg"))
     elapsed = time.time() - t0
-    print(f"抓取完成!有均价:{has_avg}  共:{len(results)}/{len(slugs)}  耗时:{elapsed / 60:.1f} 分钟")
+    print(f"抓取完成!有均价:{has_avg}  共:{len(results)}/{len(slugs)}  耗时:{elapsed / 60:.1f} 分钟", flush=True)
 
     date = _cn_date()
     generated = _utc_now_iso()
