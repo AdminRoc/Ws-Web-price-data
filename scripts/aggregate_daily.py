@@ -175,12 +175,18 @@ def append_series(date, items_meta):
         days = series.get("days") or []
         if days and days[-1].get("d") == date:
             continue  # 已追加
-        days.append({
+        day_entry = {
             "d": date,
             "avg": entry["avg"],
             "std": entry.get("std"),
             "valid": entry.get("valid", 0),
-        })
+        }
+        # 等级拆分随系列保存(可分级物品折线图按 0级/满级 分别绘制)
+        if entry.get("avg_zero"):
+            day_entry["avg_zero"] = entry["avg_zero"]["avg"]
+        if entry.get("avg_max"):
+            day_entry["avg_max"] = entry["avg_max"]["avg"]
+        days.append(day_entry)
         # 滚动保留 1000 天
         if len(days) > SERIES_RETENTION_DAYS:
             days = days[-SERIES_RETENTION_DAYS:]
@@ -262,8 +268,51 @@ def predict_long(P, ma30, std30, ma90, std90, days):
 
 
 # ── 4. 表格 bundle ─────────────────────────────────────────────────────
+def _ma_set(vals, today_entry, today_chg):
+    """由日均价序列 + 今日临时均价计算一组 MA/σ/环比字段(主口径与等级口径共用)。"""
+    values = vals + ([today_entry["avg"]] if today_entry else [])
+    if not values:
+        return None
+    P = values[-1]
+
+    def _win(n):
+        if len(values) < n:
+            return None, None
+        return _mean(values[-n:]), _stdev(values[-n:])
+
+    def _chg(n):
+        if len(values) < 2 * n:
+            return None
+        cur = _mean(values[-n:])
+        prev = _mean(values[-2 * n:-n])
+        if not cur or not prev:
+            return None
+        return (cur - prev) / prev
+
+    ma3, std3 = _win(3)
+    ma7, std7 = _win(7)
+    ma14, std14 = _win(14)
+    ma30, std30 = _win(30)
+    ma60, std60 = _win(60)
+    ma90, std90 = _win(90)
+    return {
+        "today": today_entry,
+        "last_avg": _r2(vals[-1] if vals else None),
+        "today_chg": _r4(today_chg),
+        "ma3": _r2(ma3), "std3": _r2(std3), "chg3": _r4(_chg(3)),
+        "ma7": _r2(ma7), "std7": _r2(std7), "chg7": _r4(_chg(7)),
+        "ma14": _r2(ma14), "std14": _r2(std14), "chg14": _r4(_chg(14)),
+        "ma30": _r2(ma30), "std30": _r2(std30), "chg30": _r4(_chg(30)),
+        "ma60": _r2(ma60), "std60": _r2(std60), "chg60": _r4(_chg(60)),
+        "ma90": _r2(ma90), "std90": _r2(std90), "chg90": _r4(_chg(90)),
+        "short_pred": None, "long_pred": None,   # 由调用方补预测
+    }
+
+
 def build_table_bundle(items_meta):
-    """重建 data/table/latest.json:全物品多窗口均价/波幅/环比 + 短长期预测。"""
+    """重建 data/table/latest.json:全物品多窗口均价/波幅/环比 + 短长期预测。
+    可分级物品(maxRank>0)额外输出 rank_mas:{'0':{...},'max':{...}} 等级专属统计,
+    供前端把搜索结果拆分为 0级/满级 两个对象。"""
     # 物品 → 日均价序列(最近 TABLE_MAX_DAYS 天,按日期升序)
     daily_files = []
     if os.path.isdir(DAILY_DIR):
@@ -271,25 +320,36 @@ def build_table_bundle(items_meta):
     daily_files = daily_files[-TABLE_MAX_DAYS:]
 
     series_by_slug = {}
+    series_zero_by_slug = {}
+    series_max_by_slug = {}
     for fname in daily_files:
         date = fname[:-5]
         doc = load_json(os.path.join(DAILY_DIR, fname))
         if not doc:
             continue
         for slug, e in (doc.get("items") or {}).items():
-            if e.get("avg") is None:
-                continue
-            series_by_slug.setdefault(slug, []).append((date, e["avg"]))
+            if e.get("avg") is not None:
+                series_by_slug.setdefault(slug, []).append((date, e["avg"]))
+            if e.get("avg_zero") and e["avg_zero"].get("avg") is not None:
+                series_zero_by_slug.setdefault(slug, []).append((date, e["avg_zero"]["avg"]))
+            if e.get("avg_max") and e["avg_max"].get("avg") is not None:
+                series_max_by_slug.setdefault(slug, []).append((date, e["avg_max"]["avg"]))
 
-    # 今日快照 → 临时当日均价
+    # 今日快照 → 临时当日均价(含等级)
     today = _cn_date()
     snap_today = load_json(os.path.join(SNAPSHOTS_DIR, f"{today}.json"))
     today_series = {}
+    today_zero = {}
+    today_max = {}
     if snap_today:
         for batch in (snap_today.get("batches") or []):
             for slug, rec in (batch.get("items") or {}).items():
                 if rec.get("avg") is not None:
                     today_series.setdefault(slug, []).append(rec["avg"])
+                if rec.get("avg_zero") and rec["avg_zero"].get("avg") is not None:
+                    today_zero.setdefault(slug, []).append(rec["avg_zero"]["avg"])
+                if rec.get("avg_max") and rec["avg_max"].get("avg") is not None:
+                    today_max.setdefault(slug, []).append(rec["avg_max"]["avg"])
 
     last_daily = daily_files[-1][:-5] if daily_files else None
     items = {}
@@ -309,52 +369,53 @@ def build_table_bundle(items_meta):
         today_chg = None
         if today_entry and today_entry.get("avg") is not None and last_avg:
             today_chg = (today_entry["avg"] - last_avg) / last_avg   # 当日波幅:当日均价 vs 前一日日均价
-        values = vals + ([today_entry["avg"]] if today_entry else [])
-        if not values:
+        ma = _ma_set(vals, today_entry, today_chg)
+        if ma is None:
             continue
-        P = values[-1]
-
-        def _win(n):
-            if len(values) < n:
-                return None, None
-            return _mean(values[-n:]), _stdev(values[-n:])
-
-        def _chg(n):
-            if len(values) < 2 * n:
-                return None
-            cur = _mean(values[-n:])
-            prev = _mean(values[-2 * n:-n])
-            if not cur or not prev:
-                return None
-            return (cur - prev) / prev
-
-        ma3, std3 = _win(3)
-        ma7, std7 = _win(7)
-        ma14, std14 = _win(14)
-        ma30, std30 = _win(30)
-        ma60, std60 = _win(60)
-        ma90, std90 = _win(90)
-        days = len(values)
-
-        short_pred = predict_short(P, ma3, ma14, std3, std14, ma30, std30, days)
-        long_pred = predict_long(P, ma30, std30, ma90, std90, days)
+        n_days = len(vals) + (1 if today_entry else 0)
+        P = (today_entry or {}).get("avg") if today_entry else ma["last_avg"]
+        ma["short_pred"] = predict_short(P, ma["ma3"], ma["ma14"], ma["std3"], ma["std14"],
+                                         ma["ma30"], ma["std30"], n_days)
+        ma["long_pred"] = predict_long(P, ma["ma30"], ma["std30"], ma["ma90"], ma["std90"], n_days)
 
         entry = {
             "name": meta.get("name") or slug,
             "name_zh": meta.get("name_zh") or meta.get("name") or slug,
             "category": meta.get("category") or "other",
-            "today": today_entry,
-            "last_avg": _r2(last_avg),
-            "today_chg": _r4(today_chg),
-            "ma3": _r2(ma3), "std3": _r2(std3), "chg3": _r4(_chg(3)),
-            "ma7": _r2(ma7), "std7": _r2(std7), "chg7": _r4(_chg(7)),
-            "ma14": _r2(ma14), "std14": _r2(std14), "chg14": _r4(_chg(14)),
-            "ma30": _r2(ma30), "std30": _r2(std30), "chg30": _r4(_chg(30)),
-            "ma60": _r2(ma60), "std60": _r2(std60), "chg60": _r4(_chg(60)),
-            "ma90": _r2(ma90), "std90": _r2(std90), "chg90": _r4(_chg(90)),
-            "short_pred": short_pred,
-            "long_pred": long_pred,
+            "max_rank": meta.get("maxRank") or 0,
         }
+        entry.update(ma)
+
+        # 等级拆分统计(可分级物品:0级/满级 各自一套 MA/σ/环比/预测)
+        rank_mas = {}
+        for rkey, rseries, rtoday in (("0", series_zero_by_slug, today_zero),
+                                      ("max", series_max_by_slug, today_max)):
+            rvals = [v for _, v in rseries.get(slug, [])]
+            rt_avgs = rtoday.get(slug)
+            if not rvals and not rt_avgs:
+                continue
+            rt_entry = None
+            if rt_avgs:
+                rt_entry = {
+                    "avg": round(_mean(rt_avgs), 2),
+                    "std": _r2(_stdev(rt_avgs)),
+                    "valid": len(rt_avgs),
+                }
+            r_last = rvals[-1] if rvals else (rt_entry["avg"] if rt_entry else None)
+            r_chg = None
+            if rt_entry and rt_entry.get("avg") is not None and r_last:
+                r_chg = (rt_entry["avg"] - r_last) / r_last
+            rma = _ma_set(rvals, rt_entry, r_chg)
+            if rma is None:
+                continue
+            r_days = len(rvals) + (1 if rt_entry else 0)
+            rP = rt_entry["avg"] if rt_entry else rma["last_avg"]
+            rma["short_pred"] = predict_short(rP, rma["ma3"], rma["ma14"], rma["std3"], rma["std14"],
+                                              rma["ma30"], rma["std30"], r_days)
+            rma["long_pred"] = predict_long(rP, rma["ma30"], rma["std30"], rma["ma90"], rma["std90"], r_days)
+            rank_mas[rkey] = rma
+        if rank_mas:
+            entry["rank_mas"] = rank_mas
         items[slug] = entry
 
     bundle = {
