@@ -1,17 +1,23 @@
 #!/usr/bin/env python3
 """Ws-Web-price-data · 快照抓取(Phase 1) —— 全量均价快照,每次运行一个批次。
 
-口径(与 Public-WM fetch_avg_prices.py 一致,单一均价,无等级拆分):
+口径(与 Public-WM fetch_avg_prices.py 一致):
   - 样本 = in-game + online 的卖单合并(/v2/orders/item/{slug});offline 永不参与
   - count>=3:去掉最低价(第 1 位),取第 2 与第 3 位价格均值 = avg
   - count 1~2:全部价格取平均
   - count=0:avg=null(不参与当日平均,聚合侧跳过)
   - special = count<3
+  - 可分级物品(maxRank>0,如 Mod/Arcane)额外输出 avg_zero(0级)/avg_max(满级)/
+    max_rank —— 满级与零级价格往往差数倍,分开统计避免信息丢失。
+
+速率(遵守 wfm-docs 官方规则,How-To-Design-The-UI/wfm-docs/docs/rules/overview.md):
+  - 公共 API 限速 3 req/s:全局 RateLimiter 强制,任意窗口请求发起速率 ≤3/s;
+  - 并发 8 仅容忍慢响应,不提高请求发起速率。
 
 产物:
   - data/snapshots/{UTC+8当日}.json —— 每日一个文件,内含 batches 数组,本次追加一个批次:
-      { date, tz, generated, batches: [ { time, items: { slug: {avg,count,used,special} } } ] }
-  - data/meta/items.json —— 物品清单(名称/中文名/类别 tags),供站点搜索与筛选
+      { date, tz, generated, batches: [ { time, items: { slug: {avg,count,used,special[,avg_zero,avg_max,max_rank]} } } ] }
+  - data/meta/items.json —— 物品清单(名称/中文名/类别/maxRank),供站点搜索与筛选
 
 抗劣化设计(2026-08-19 实测 WM 间歇性慢响应后加固):
   - Retry-After 优先(429/509 按响应头等待);
@@ -27,6 +33,7 @@
 环境变量:
   - DATA_DIR  默认 "data"
   - MAX_ITEMS 默认 0=全量;>0 仅取前 N 个(本地冒烟测试用)
+  - MAX_RPS   默认 3.0(wfm-docs 限速,不建议调高)
 """
 import asyncio
 import json
@@ -41,10 +48,14 @@ import aiohttp
 
 DIRECT_URL = "https://api.warframe.market"
 
-# 速率策略:并发 12 + 0.4~1.0s 随机间隔(自适应可调);每 50 个 slug 额外休息 2~5s
-CONCURRENCY = int(os.environ.get("CONCURRENCY", "12"))
-MIN_DELAY = 0.4
-MAX_DELAY = 1.0
+# 速率策略(遵守 wfm-docs 官方文档规则 — How-To-Design-The-UI/wfm-docs/docs/rules/overview.md):
+#   "The general public API limit is 3 requests per second."
+# - 全局令牌式限速器强制 ≤3 req/s(无论并发多少,请求"发起"速率恒定 ≤3/s);
+# - 并发 8 仅用于容忍慢响应(在途请求数),不提高请求发起速率;
+# - 全量 3837 物品理论最短耗时 ≈ 3837/3 ≈ 21 分钟,预算 35 分钟留足重试余量;
+# - 自适应限速仍保留:失败率高时进一步加大间隔,恢复后回落。
+CONCURRENCY = int(os.environ.get("CONCURRENCY", "8"))
+MAX_RPS = float(os.environ.get("MAX_RPS", "3.0"))   # wfm-docs 规定的公共 API 限速
 STARTUP_JITTER_MAX = 180  # 3min,错峰
 BATCH_SIZE = 50
 BATCH_PAUSE_MIN = 2
@@ -52,7 +63,7 @@ BATCH_PAUSE_MAX = 5
 MAX_RETRIES = 4          # 单物品尝试次数(含首次)
 BACKOFF_CAP = 30         # 秒,指数退避封顶
 RETRY_ROUNDS = 2         # 主循环后对失败 slug 的补跑轮数
-RUN_TIME_BUDGET = int(os.environ.get("RUN_TIME_BUDGET", "1800"))  # 秒(30min),到期中断并提交部分批次
+RUN_TIME_BUDGET = int(os.environ.get("RUN_TIME_BUDGET", "2100"))  # 秒(35min),到期中断并提交部分批次
 ITEMS_TIMEOUT = 30
 ITEMS_RETRIES = 5
 PROGRESS_EVERY = 300
@@ -78,10 +89,9 @@ HEADERS = {
 class Throttle:
     """自适应限速:滚动窗口统计失败率,失败率高时加大请求间隔,恢复后回落。"""
 
-    def __init__(self, min_delay, max_delay):
-        self.min_delay = min_delay
-        self.max_delay = max_delay
-        self.cur_delay = max_delay
+    def __init__(self, max_rps):
+        self.max_rps = max_rps
+        self.cur_delay = 0.0
         self.window = deque(maxlen=60)
 
     def record(self, ok):
@@ -89,12 +99,30 @@ class Throttle:
         if len(self.window) >= 20:
             rate = sum(self.window) / len(self.window)
             if rate < 0.5:
-                self.cur_delay = min(3.0, self.cur_delay + 0.3)
+                self.cur_delay = min(2.0, self.cur_delay + 0.2)
             elif rate > 0.85:
-                self.cur_delay = max(self.min_delay, self.cur_delay - 0.2)
+                self.cur_delay = max(0.0, self.cur_delay - 0.1)
 
     def jitter(self):
-        return self.cur_delay + random.random() * (self.max_delay - self.min_delay)
+        return self.cur_delay + random.random() * 0.05
+
+
+class RateLimiter:
+    """全局请求速率限制器(wfm-docs 规则:公共 API ≤3 req/s)。
+    在每次请求"发起"前 wait(),保证任意窗口内请求发起速率不超过 MAX_RPS。"""
+
+    def __init__(self, max_rps):
+        self.interval = 1.0 / max_rps
+        self._lock = asyncio.Lock()
+        self._next = 0.0
+
+    async def wait(self):
+        async with self._lock:
+            now = time.monotonic()
+            if now < self._next:
+                await asyncio.sleep(self._next - now)
+                now = time.monotonic()
+            self._next = now + self.interval
 
 
 def _utc_now_iso():
@@ -116,14 +144,17 @@ def _backoff(attempt, resp=None):
     return min((2 ** attempt) * 5, BACKOFF_CAP) + random.random() * 2
 
 
-def calc_avg(orders):
-    """合并口径均价(去最低,取第 2/3 位均值)。"""
+def calc_avg(orders, rank=None):
+    """合并口径均价(去最低,取第 2/3 位均值)。
+    rank=None 为整体口径;rank=数字 仅统计该等级卖单(用于 avg_zero/avg_max,
+    可分级物品如 Mod/Arcane —— 满级与零级价格往往差数倍,分开统计避免信息丢失)。"""
     prices = sorted(
         int(o["platinum"]) for o in orders
         if (o.get("type") or o.get("order_type") or o.get("orderType") or "").lower() == "sell"
         and o.get("visible", True) is not False
         and o.get("platinum", 0) > 0
         and (o.get("user") or {}).get("status", "").lower() in ("ingame", "online")
+        and (rank is None or o.get("rank") == rank)
     )
     count = len(prices)
     if count == 0:
@@ -191,15 +222,16 @@ async def fetch_items(session):
     raise last
 
 
-async def fetch_slug(session, sem, slug, throttle, deadline):
-    """单物品抓取:返回 (slug, calc_avg结果) / (slug, "ERROR") / (slug, "SKIPPED")。
-    每次尝试前检查总截止时间(deadline),超时立即 SKIPPED,杜绝任何卡点。"""
+async def fetch_slug(session, sem, limiter, slug, max_rank, throttle, deadline):
+    """单物品抓取:返回 (slug, 结果) / (slug, "ERROR") / (slug, "SKIPPED")。
+    每次请求发起前经 RateLimiter 限速(≤3 req/s);尝试前检查总截止时间(deadline)。"""
     url = f"{DIRECT_URL}/v2/orders/item/{slug}"
     async with sem:
         for attempt in range(MAX_RETRIES):
             if time.time() > deadline:
                 return slug, "SKIPPED"
             try:
+                await limiter.wait()   # wfm-docs:公共 API ≤3 req/s
                 async with session.get(url, headers=HEADERS,
                                        timeout=aiohttp.ClientTimeout(total=20)) as r:
                     if r.status in (429, 509):
@@ -216,22 +248,29 @@ async def fetch_slug(session, sem, slug, throttle, deadline):
                     orders = data.get("data") or []
                     throttle.record(True)
                     await asyncio.sleep(throttle.jitter())
-                    return slug, calc_avg(orders)
+                    result = calc_avg(orders)
+                    # 可分级物品:额外统计 0级(avg_zero)与满级(avg_max)口径,统计不丢等级信息
+                    if max_rank and max_rank > 0:
+                        result["avg_zero"] = calc_avg(orders, rank=0)
+                        result["avg_max"] = calc_avg(orders, rank=max_rank)
+                        result["max_rank"] = max_rank
+                    return slug, result
             except Exception:
                 throttle.record(False)
                 await asyncio.sleep(0.5 + random.random())
     return slug, "ERROR"
 
 
-async def run_pass(session, sem, tasks, results, failed, round_no, throttle, t0):
+async def run_pass(session, sem, limiter, tasks, max_ranks, results, failed, round_no, throttle, t0):
     """执行一轮抓取;round_no=0 全量,round_no>=1 只处理 failed。
     总时间预算到期时中断剩余任务,返回已完成的(部分批次)。"""
     pending = tasks if round_no == 0 else list(failed)
     if not pending:
         return False
     deadline = t0 + RUN_TIME_BUDGET
-    tasks_ = [asyncio.ensure_future(fetch_slug(session, sem, slug, throttle, deadline))
-              for slug in pending]
+    tasks_ = [asyncio.ensure_future(
+        fetch_slug(session, sem, limiter, slug, max_ranks.get(slug, 0), throttle, deadline))
+        for slug in pending]
     done_count = 0
     failed.clear()
     timed_out = False
@@ -321,22 +360,27 @@ async def main():
     if MAX_ITEMS > 0:
         items = items[:MAX_ITEMS]
     slugs = [it["slug"] for it in items]
-    print(f"共 {len(slugs)} 个物品,并发={CONCURRENCY},预算 {RUN_TIME_BUDGET/60:.0f} 分钟", flush=True)
+    # maxRank>0 才是真正可分级物品(mod/arcane 等),用于 avg_zero/avg_max 拆分
+    max_ranks = {it["slug"]: (it.get("maxRank") or 0) for it in items}
+    est = len(slugs) / MAX_RPS / 60
+    print(f"共 {len(slugs)} 个物品,并发={CONCURRENCY},限速 {MAX_RPS} req/s(wfm-docs 规则),"
+          f"预估 {est:.1f} 分钟,预算 {RUN_TIME_BUDGET/60:.0f} 分钟", flush=True)
 
     results = {}
     failed = set()
     sem = asyncio.Semaphore(CONCURRENCY)
-    throttle = Throttle(MIN_DELAY, MAX_DELAY)
+    throttle = Throttle(MAX_RPS)
+    limiter = RateLimiter(MAX_RPS)
     t0 = time.time()
 
     async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(
             limit=CONCURRENCY, limit_per_host=CONCURRENCY, ttl_dns_cache=300)) as session:
-        timed_out = await run_pass(session, sem, slugs, results, failed, 0, throttle, t0)
+        timed_out = await run_pass(session, sem, limiter, slugs, max_ranks, results, failed, 0, throttle, t0)
         if not timed_out:
             for rnd in range(1, RETRY_ROUNDS + 1):
                 if not failed:
                     break
-                timed_out = await run_pass(session, sem, slugs, results, failed, rnd, throttle, t0)
+                timed_out = await run_pass(session, sem, limiter, slugs, max_ranks, results, failed, rnd, throttle, t0)
                 if timed_out:
                     break
 

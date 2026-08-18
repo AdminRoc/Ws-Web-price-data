@@ -129,6 +129,12 @@ def aggregate_daily(date, force=False):
             "max": max(valid),
             "std": _r2(_stdev(valid)),
         }
+        # 等级拆分汇总(快照携带 avg_zero/avg_max 时):统计不丢等级信息
+        for key in ("avg_zero", "avg_max"):
+            rv = [r[key]["avg"] for r in recs
+                  if r.get(key) and r[key].get("avg") is not None]
+            if rv:
+                entry[key] = {"avg": round(_mean(rv), 2), "valid": len(rv)}
         daily_items[slug] = entry
 
     doc = {
