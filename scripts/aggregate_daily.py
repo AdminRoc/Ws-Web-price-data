@@ -300,6 +300,7 @@ def build_table_bundle(items_meta):
                 "std": _r2(_stdev(today_avgs)),
                 "valid": len(today_avgs),
             }
+        last_avg = vals[-1] if vals else None          # 前一天日均价(区间筛选用)
         values = vals + ([today_entry["avg"]] if today_entry else [])
         if not values:
             continue
@@ -335,6 +336,7 @@ def build_table_bundle(items_meta):
             "name_zh": meta.get("name_zh") or meta.get("name") or slug,
             "category": meta.get("category") or "other",
             "today": today_entry,
+            "last_avg": _r2(last_avg),
             "ma3": _r2(ma3), "std3": _r2(std3), "chg3": _r4(_chg(3)),
             "ma7": _r2(ma7), "std7": _r2(std7), "chg7": _r4(_chg(7)),
             "ma14": _r2(ma14), "std14": _r2(std14), "chg14": _r4(_chg(14)),
