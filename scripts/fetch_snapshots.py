@@ -140,9 +140,22 @@ def calc_avg(orders):
     return result
 
 
+CATEGORY_PREF = [
+    "warframe", "primary", "secondary", "melee", "archwing",
+    "mods", "mod", "arcane", "relic", "component", "fish",
+    "gem", "misc", "sentinel", "pet", "companion",
+]
+
+
 def _category(tags):
-    """WM 官方 tags 首项作为类别(用户要求按 WM 官方物品类别分类)。"""
-    return (tags[0] if tags else "other") or "other"
+    """WM 官方 tags 按优先序取主类别(与站点 data-source.js categoryOf 一致);
+    无命中时退回 tags 首项,再退回 other。"""
+    list_tags = tags or []
+    for pref in CATEGORY_PREF:
+        for t in list_tags:
+            if str(t).lower() == pref:
+                return pref
+    return (list_tags[0] if list_tags else "other") or "other"
 
 
 def _item_meta(it):
