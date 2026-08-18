@@ -1,0 +1,74 @@
+name: 抓取全量均价快照
+
+# 每 2 小时(UTC 第 15 分)从 WM v2 API 抓取全量均价快照,追加进当日批次文件。
+# 产物:
+#   data/snapshots/YYYY-MM-DD.json  — 当日快照批次(UTC+8 日期键,时间戳存 UTC)
+#   data/meta/items.json           — 物品清单(名称/中文名/类别)
+# 提交到 main 后,站点(Ws-Web-price)经 jsDelivr 多源引用。
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '15 */2 * * *'   # 每 2 小时第 15 分(UTC);脚本内另有 0~3min 随机延迟错峰
+
+concurrency:
+  group: fetch-snapshots
+  cancel-in-progress: true   # 上一轮未跑完时直接取消,避免积压排队
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
+
+      - name: 安装依赖
+        run: pip install aiohttp -q
+
+      - name: 抓取全量快照
+        run: python3 scripts/fetch_snapshots.py
+        env:
+          DATA_DIR: data
+
+      - name: 提交并推送
+        id: commit
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/
+          if git diff --staged --quiet; then
+            echo "无变动,跳过提交"
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git commit -m "data: 均价快照批次 [skip ci]"
+          for i in 1 2 3 4 5; do
+            if git push; then
+              echo "changed=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            rm -rf /tmp/data_bak && mkdir -p /tmp/data_bak
+            cp -r data/* /tmp/data_bak/ 2>/dev/null || true
+            git rebase --abort 2>/dev/null || true
+            git fetch origin main
+            git reset --hard origin/main
+            rm -rf data && mkdir -p data
+            cp -r /tmp/data_bak/* data/ 2>/dev/null || true
+            git add data/
+            git commit -m "data: 均价快照批次 [skip ci]"
+            sleep "$(( (RANDOM % 4) + 2 ))"
+          done
+          exit 1
+
+      # jsDelivr 的 @main 跟随最新 commit,但 CDN 缓存有延迟;提交后主动 purge 立即生效。
+      # 注意:快照文件名按 UTC+8 日期键命名,purge 时也要按 UTC+8 计算当日。
+      - name: 刷新 jsDelivr 缓存(快照)
+        if: steps.commit.outputs.changed == 'true'
+        run: |
+          CN_DATE=$(TZ='Asia/Shanghai' date +%Y-%m-%d)
+          curl -s "https://purge.jsdelivr.net/gh/AdminRoc/Ws-Web-price-data@main/data/snapshots/${CN_DATE}.json" || true
+          curl -s "https://purge.jsdelivr.net/gh/AdminRoc/Ws-Web-price-data@main/data/meta/items.json" || true

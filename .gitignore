@@ -1,0 +1,18 @@
+# OS
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# Editors
+.vscode/
+.idea/
+
+# Python
+__pycache__/
+*.pyc
+
+# 本地冒烟测试输出(不提交)
+.smoke/
+
+# 临时文件
+*.log
