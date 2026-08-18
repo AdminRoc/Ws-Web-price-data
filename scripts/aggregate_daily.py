@@ -135,6 +135,11 @@ def aggregate_daily(date, force=False):
                   if r.get(key) and r[key].get("avg") is not None]
             if rv:
                 entry[key] = {"avg": round(_mean(rv), 2), "valid": len(rv)}
+        # 求购均价汇总(价差/市场深度统计用)
+        buy_avgs = [r["buy_avg"]["avg"] for r in recs
+                    if r.get("buy_avg") and r["buy_avg"].get("avg") is not None]
+        if buy_avgs:
+            entry["buy_avg"] = round(_mean(buy_avgs), 2)
         daily_items[slug] = entry
 
     doc = {

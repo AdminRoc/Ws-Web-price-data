@@ -144,13 +144,13 @@ def _backoff(attempt, resp=None):
     return min((2 ** attempt) * 5, BACKOFF_CAP) + random.random() * 2
 
 
-def calc_avg(orders, rank=None):
+def calc_avg(orders, rank=None, order_type="sell"):
     """合并口径均价(去最低,取第 2/3 位均值)。
-    rank=None 为整体口径;rank=数字 仅统计该等级卖单(用于 avg_zero/avg_max,
-    可分级物品如 Mod/Arcane —— 满级与零级价格往往差数倍,分开统计避免信息丢失)。"""
+    rank=None 为整体口径;rank=数字 仅统计该等级卖单(用于 avg_zero/avg_max)。
+    order_type='sell' 统计卖单;'buy' 统计求购单(同样 in-game+online 样本,供未来价差统计)。"""
     prices = sorted(
         int(o["platinum"]) for o in orders
-        if (o.get("type") or o.get("order_type") or o.get("orderType") or "").lower() == "sell"
+        if (o.get("type") or o.get("order_type") or o.get("orderType") or "").lower() == order_type
         and o.get("visible", True) is not False
         and o.get("platinum", 0) > 0
         and (o.get("user") or {}).get("status", "").lower() in ("ingame", "online")
@@ -198,6 +198,14 @@ def _item_meta(it):
         "name_zh": zh or en,
         "category": _category(it.get("tags")),
         "tags": it.get("tags") or [],
+        "maxRank": it.get("maxRank") or 0,
+        # 未来展示/统计可能需要的元数据(来自 /v2/items,一次性补齐,避免缺数据)
+        "thumb": it.get("thumb") or "",
+        "icon": it.get("icon") or "",
+        "rarity": it.get("rarity"),
+        "bulkTradable": bool(it.get("bulkTradable")),
+        "tradingTax": it.get("tradingTax"),
+        "maxCharges": it.get("maxCharges"),
     }
 
 
@@ -249,6 +257,11 @@ async def fetch_slug(session, sem, limiter, slug, max_rank, throttle, deadline):
                     throttle.record(True)
                     await asyncio.sleep(throttle.jitter())
                     result = calc_avg(orders)
+                    result["total"] = len(orders)   # 全部订单数(含 offline/求购,市场活跃度代理指标)
+                    # 求购均价(价差统计用,与卖单同口径但取 buy 单)
+                    buy = calc_avg(orders, order_type="buy")
+                    if buy.get("avg") is not None:
+                        result["buy_avg"] = buy
                     # 可分级物品:额外统计 0级(avg_zero)与满级(avg_max)口径,统计不丢等级信息
                     if max_rank and max_rank > 0:
                         result["avg_zero"] = calc_avg(orders, rank=0)
