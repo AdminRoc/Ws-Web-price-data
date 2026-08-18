@@ -42,7 +42,7 @@ import aiohttp
 DIRECT_URL = "https://api.warframe.market"
 
 # 速率策略:并发 12 + 0.4~1.0s 随机间隔(自适应可调);每 50 个 slug 额外休息 2~5s
-CONCURRENCY = 12
+CONCURRENCY = int(os.environ.get("CONCURRENCY", "12"))
 MIN_DELAY = 0.4
 MAX_DELAY = 1.0
 STARTUP_JITTER_MAX = 180  # 3min,错峰
@@ -52,7 +52,7 @@ BATCH_PAUSE_MAX = 5
 MAX_RETRIES = 4          # 单物品尝试次数(含首次)
 BACKOFF_CAP = 30         # 秒,指数退避封顶
 RETRY_ROUNDS = 2         # 主循环后对失败 slug 的补跑轮数
-RUN_TIME_BUDGET = 1800   # 秒(30min),到期中断并提交部分批次
+RUN_TIME_BUDGET = int(os.environ.get("RUN_TIME_BUDGET", "1800"))  # 秒(30min),到期中断并提交部分批次
 ITEMS_TIMEOUT = 30
 ITEMS_RETRIES = 5
 PROGRESS_EVERY = 300
@@ -178,11 +178,14 @@ async def fetch_items(session):
     raise last
 
 
-async def fetch_slug(session, sem, slug, throttle):
-    """单物品抓取:返回 (slug, calc_avg结果) / (slug, "ERROR") / (slug, "SKIPPED")。"""
+async def fetch_slug(session, sem, slug, throttle, deadline):
+    """单物品抓取:返回 (slug, calc_avg结果) / (slug, "ERROR") / (slug, "SKIPPED")。
+    每次尝试前检查总截止时间(deadline),超时立即 SKIPPED,杜绝任何卡点。"""
     url = f"{DIRECT_URL}/v2/orders/item/{slug}"
     async with sem:
         for attempt in range(MAX_RETRIES):
+            if time.time() > deadline:
+                return slug, "SKIPPED"
             try:
                 async with session.get(url, headers=HEADERS,
                                        timeout=aiohttp.ClientTimeout(total=20)) as r:
@@ -213,31 +216,42 @@ async def run_pass(session, sem, tasks, results, failed, round_no, throttle, t0)
     pending = tasks if round_no == 0 else list(failed)
     if not pending:
         return False
-    coros = [fetch_slug(session, sem, slug, throttle) for slug in pending]
-    done = 0
+    deadline = t0 + RUN_TIME_BUDGET
+    tasks_ = [asyncio.ensure_future(fetch_slug(session, sem, slug, throttle, deadline))
+              for slug in pending]
+    done_count = 0
     failed.clear()
     timed_out = False
-    for coro in asyncio.as_completed(coros):
-        if time.time() - t0 > RUN_TIME_BUDGET:
+    remaining = list(tasks_)
+    while remaining:
+        now = time.time()
+        if now > deadline:
             timed_out = True
             break
-        slug, result = await coro
-        done += 1
-        if result == "ERROR":
-            failed.add(slug)
-            continue
-        results[slug] = result
-        if done % PROGRESS_EVERY == 0:
-            elapsed = time.time() - t0
-            print(f"  [进度 {done}/{len(pending)}] 耗时 {elapsed/60:.1f} 分钟,"
-                  f"失败 {len(failed)},当前间隔 {throttle.cur_delay:.2f}s", flush=True)
-        if done % BATCH_SIZE == 0 and done < len(pending):
-            await asyncio.sleep(BATCH_PAUSE_MIN + random.random() * (BATCH_PAUSE_MAX - BATCH_PAUSE_MIN))
+        done, remaining = await asyncio.wait(
+            remaining, timeout=max(0.1, deadline - now),
+            return_when=asyncio.FIRST_COMPLETED)
+        for t in done:
+            done_count += 1
+            slug, result = t.result()   # fetch_slug 内部全捕获,不会抛异常
+            if result == "ERROR":
+                failed.add(slug)
+                continue
+            if result == "SKIPPED":
+                continue
+            results[slug] = result
+            if done_count % PROGRESS_EVERY == 0:
+                elapsed = time.time() - t0
+                print(f"  [进度 {done_count}/{len(pending)}] 耗时 {elapsed/60:.1f} 分钟,"
+                      f"失败 {len(failed)},当前间隔 {throttle.cur_delay:.2f}s", flush=True)
+            if done_count % BATCH_SIZE == 0 and done_count < len(pending):
+                await asyncio.sleep(BATCH_PAUSE_MIN + random.random() * (BATCH_PAUSE_MAX - BATCH_PAUSE_MIN))
     if timed_out:
-        for c in coros:
-            c.cancel()
+        for t in remaining:
+            t.cancel()
+        await asyncio.gather(*remaining, return_exceptions=True)
         print(f"  ⏰ 超过 {RUN_TIME_BUDGET/60:.0f} 分钟预算,中断本轮,提交部分批次", flush=True)
-    print(f"  第{round_no}轮:完成 {done},失败 {len(failed)}"
+    print(f"  第{round_no}轮:完成 {done_count},失败 {len(failed)}"
           + (f",补跑剩余 {len(failed)}" if failed else ""), flush=True)
     return timed_out
 
