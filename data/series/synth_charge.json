@@ -1,1 +1,1 @@
-{"slug":"synth_charge","name":"Synth Charge","name_zh":"合成 充能","category":"secondary","days":[{"d":"2026-08-19","avg":5.42,"std":0.67,"valid":12},{"d":"2026-08-20","avg":5.25,"std":0.45,"valid":12}]}
+{"slug":"synth_charge","name":"Synth Charge","name_zh":"合成 充能","category":"secondary","days":[{"d":"2026-08-19","avg":5.42,"std":0.67,"valid":12},{"d":"2026-08-20","avg":5.25,"std":0.45,"valid":12},{"d":"2026-08-21","avg":5.33,"std":0.89,"valid":12}]}
