@@ -1,1 +1,1 @@
-{"slug":"repo_audit","name":"Repo Audit","name_zh":"回购审计","category":"mod","days":[{"d":"2026-08-19","avg":10.5,"std":1.24,"valid":12},{"d":"2026-08-20","avg":11.0,"std":1.76,"valid":12},{"d":"2026-08-21","avg":11.42,"std":1.98,"valid":12}]}
+{"slug":"repo_audit","name":"Repo Audit","name_zh":"回购审计","category":"mod","days":[{"d":"2026-08-19","avg":10.5,"std":1.24,"valid":12},{"d":"2026-08-20","avg":11.0,"std":1.76,"valid":12},{"d":"2026-08-21","avg":11.42,"std":1.98,"valid":12},{"d":"2026-08-22","avg":11.25,"std":1.76,"valid":12,"avg_zero":11.42,"avg_max":27.67}]}

@@ -1,1 +1,1 @@
-{"slug":"masters_edge","name":"Master's Edge","name_zh":"宗师锐势","category":"melee","days":[{"d":"2026-08-19","avg":4.83,"std":0.72,"valid":12},{"d":"2026-08-20","avg":5.0,"std":0.43,"valid":12},{"d":"2026-08-21","avg":5.08,"std":0.79,"valid":12}]}
+{"slug":"masters_edge","name":"Master's Edge","name_zh":"宗师锐势","category":"melee","days":[{"d":"2026-08-19","avg":4.83,"std":0.72,"valid":12},{"d":"2026-08-20","avg":5.0,"std":0.43,"valid":12},{"d":"2026-08-21","avg":5.08,"std":0.79,"valid":12},{"d":"2026-08-22","avg":5.0,"std":1.04,"valid":12,"avg_zero":5.33,"avg_max":11.58}]}

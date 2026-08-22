@@ -1,1 +1,1 @@
-{"slug":"investigator","name":"Investigator","name_zh":"侦察","category":"mod","days":[{"d":"2026-08-19","avg":14.92,"std":11.9,"valid":12},{"d":"2026-08-20","avg":15.75,"std":24.69,"valid":12},{"d":"2026-08-21","avg":9.58,"std":3.12,"valid":12}]}
+{"slug":"investigator","name":"Investigator","name_zh":"侦察","category":"mod","days":[{"d":"2026-08-19","avg":14.92,"std":11.9,"valid":12},{"d":"2026-08-20","avg":15.75,"std":24.69,"valid":12},{"d":"2026-08-21","avg":9.58,"std":3.12,"valid":12},{"d":"2026-08-22","avg":14.42,"std":12.03,"valid":12,"avg_zero":16.17,"avg_max":69.75}]}

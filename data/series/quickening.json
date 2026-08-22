@@ -1,1 +1,1 @@
-{"slug":"quickening","name":"Quickening","name_zh":"加速","category":"melee","days":[{"d":"2026-08-19","avg":12.0,"std":1.54,"valid":12},{"d":"2026-08-20","avg":12.08,"std":2.07,"valid":12},{"d":"2026-08-21","avg":12.83,"std":1.4,"valid":12}]}
+{"slug":"quickening","name":"Quickening","name_zh":"加速","category":"melee","days":[{"d":"2026-08-19","avg":12.0,"std":1.54,"valid":12},{"d":"2026-08-20","avg":12.08,"std":2.07,"valid":12},{"d":"2026-08-21","avg":12.83,"std":1.4,"valid":12},{"d":"2026-08-22","avg":13.08,"std":2.02,"valid":12,"avg_zero":13.08,"avg_max":25.75}]}

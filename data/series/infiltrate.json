@@ -1,1 +1,1 @@
-{"slug":"infiltrate","name":"Infiltrate","name_zh":"渗透","category":"warframe","days":[{"d":"2026-08-19","avg":13.08,"std":1.62,"valid":12},{"d":"2026-08-20","avg":13.17,"std":2.44,"valid":12},{"d":"2026-08-21","avg":13.25,"std":5.21,"valid":12}]}
+{"slug":"infiltrate","name":"Infiltrate","name_zh":"渗透","category":"warframe","days":[{"d":"2026-08-19","avg":13.08,"std":1.62,"valid":12},{"d":"2026-08-20","avg":13.17,"std":2.44,"valid":12},{"d":"2026-08-21","avg":13.25,"std":5.21,"valid":12},{"d":"2026-08-22","avg":14.17,"std":1.11,"valid":12,"avg_zero":14.75,"avg_max":22.92}]}

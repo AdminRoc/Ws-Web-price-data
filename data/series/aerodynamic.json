@@ -1,1 +1,1 @@
-{"slug":"aerodynamic","name":"Aerodynamic","name_zh":"空气动力","category":"mod","days":[{"d":"2026-08-19","avg":9.58,"std":0.67,"valid":12},{"d":"2026-08-20","avg":9.33,"std":0.78,"valid":12},{"d":"2026-08-21","avg":9.5,"std":0.52,"valid":12}]}
+{"slug":"aerodynamic","name":"Aerodynamic","name_zh":"空气动力","category":"mod","days":[{"d":"2026-08-19","avg":9.58,"std":0.67,"valid":12},{"d":"2026-08-20","avg":9.33,"std":0.78,"valid":12},{"d":"2026-08-21","avg":9.5,"std":0.52,"valid":12},{"d":"2026-08-22","avg":8.92,"std":0.79,"valid":12,"avg_zero":8.92,"avg_max":17.0}]}

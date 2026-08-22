@@ -1,1 +1,1 @@
-{"slug":"serrated_edges","name":"Serrated Edges","name_zh":"锯齿边缘","category":"melee","days":[{"d":"2026-08-19","avg":262.5,"std":25.0,"valid":4},{"d":"2026-08-20","avg":283.33,"std":25.82,"valid":6},{"d":"2026-08-21","avg":250.0,"std":0.0,"valid":3}]}
+{"slug":"serrated_edges","name":"Serrated Edges","name_zh":"锯齿边缘","category":"melee","days":[{"d":"2026-08-19","avg":262.5,"std":25.0,"valid":4},{"d":"2026-08-20","avg":283.33,"std":25.82,"valid":6},{"d":"2026-08-21","avg":250.0,"std":0.0,"valid":3},{"d":"2026-08-22","avg":250.0,"std":0.0,"valid":3,"avg_max":250.0}]}

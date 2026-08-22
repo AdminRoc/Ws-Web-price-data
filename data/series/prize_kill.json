@@ -1,1 +1,1 @@
-{"slug":"prize_kill","name":"Prize Kill","name_zh":"杀戮奖励","category":"primary","days":[{"d":"2026-08-19","avg":350.0,"std":null,"valid":1},{"d":"2026-08-20","avg":225.0,"std":176.78,"valid":2},{"d":"2026-08-21","avg":350.0,"std":null,"valid":1}]}
+{"slug":"prize_kill","name":"Prize Kill","name_zh":"杀戮奖励","category":"primary","days":[{"d":"2026-08-19","avg":350.0,"std":null,"valid":1},{"d":"2026-08-20","avg":225.0,"std":176.78,"valid":2},{"d":"2026-08-21","avg":350.0,"std":null,"valid":1},{"d":"2026-08-22","avg":350.0,"std":null,"valid":1,"avg_max":350.0}]}

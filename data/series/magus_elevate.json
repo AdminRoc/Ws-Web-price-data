@@ -1,1 +1,1 @@
-{"slug":"magus_elevate","name":"Magus Elevate","name_zh":"魔导·振奋","category":"rare","days":[{"d":"2026-08-19","avg":4.67,"std":0.65,"valid":12},{"d":"2026-08-20","avg":4.67,"std":0.78,"valid":12},{"d":"2026-08-21","avg":4.33,"std":0.89,"valid":12}]}
+{"slug":"magus_elevate","name":"Magus Elevate","name_zh":"魔导·振奋","category":"rare","days":[{"d":"2026-08-19","avg":4.67,"std":0.65,"valid":12},{"d":"2026-08-20","avg":4.67,"std":0.78,"valid":12},{"d":"2026-08-21","avg":4.33,"std":0.89,"valid":12},{"d":"2026-08-22","avg":7.08,"std":7.87,"valid":12,"avg_zero":4.75,"avg_max":60.58}]}

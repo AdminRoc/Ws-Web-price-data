@@ -1,1 +1,1 @@
-{"slug":"adaptation","name":"Adaptation","name_zh":"适应","category":"warframe","days":[{"d":"2026-08-19","avg":5.92,"std":0.9,"valid":12},{"d":"2026-08-20","avg":5.42,"std":1.0,"valid":12},{"d":"2026-08-21","avg":5.33,"std":0.65,"valid":12}]}
+{"slug":"adaptation","name":"Adaptation","name_zh":"适应","category":"warframe","days":[{"d":"2026-08-19","avg":5.92,"std":0.9,"valid":12},{"d":"2026-08-20","avg":5.42,"std":1.0,"valid":12},{"d":"2026-08-21","avg":5.33,"std":0.65,"valid":12},{"d":"2026-08-22","avg":5.0,"std":0.43,"valid":12,"avg_zero":5.0,"avg_max":60.42}]}

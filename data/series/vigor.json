@@ -1,1 +1,1 @@
-{"slug":"vigor","name":"Vigor","name_zh":"活力","category":"warframe","days":[{"d":"2026-08-19","avg":5.33,"std":0.98,"valid":12},{"d":"2026-08-20","avg":5.17,"std":0.94,"valid":12},{"d":"2026-08-21","avg":4.83,"std":0.58,"valid":12}]}
+{"slug":"vigor","name":"Vigor","name_zh":"活力","category":"warframe","days":[{"d":"2026-08-19","avg":5.33,"std":0.98,"valid":12},{"d":"2026-08-20","avg":5.17,"std":0.94,"valid":12},{"d":"2026-08-21","avg":4.83,"std":0.58,"valid":12},{"d":"2026-08-22","avg":5.33,"std":1.83,"valid":12,"avg_zero":5.5,"avg_max":13.25}]}

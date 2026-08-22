@@ -1,1 +1,1 @@
-{"slug":"cutting_edge","name":"Cutting Edge","name_zh":"切割刃缘","category":"melee","days":[{"d":"2026-08-19","avg":3.75,"std":0.62,"valid":12},{"d":"2026-08-20","avg":5.08,"std":2.27,"valid":12},{"d":"2026-08-21","avg":9.42,"std":16.05,"valid":12}]}
+{"slug":"cutting_edge","name":"Cutting Edge","name_zh":"切割刃缘","category":"melee","days":[{"d":"2026-08-19","avg":3.75,"std":0.62,"valid":12},{"d":"2026-08-20","avg":5.08,"std":2.27,"valid":12},{"d":"2026-08-21","avg":9.42,"std":16.05,"valid":12},{"d":"2026-08-22","avg":5.0,"std":2.59,"valid":12,"avg_zero":5.0,"avg_max":85.67}]}

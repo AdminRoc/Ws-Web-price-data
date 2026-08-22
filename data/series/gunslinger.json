@@ -1,1 +1,1 @@
-{"slug":"gunslinger","name":"Gunslinger","name_zh":"神枪手","category":"secondary","days":[{"d":"2026-08-19","avg":3.58,"std":0.67,"valid":12},{"d":"2026-08-20","avg":5.17,"std":2.72,"valid":12},{"d":"2026-08-21","avg":3.92,"std":1.68,"valid":12}]}
+{"slug":"gunslinger","name":"Gunslinger","name_zh":"神枪手","category":"secondary","days":[{"d":"2026-08-19","avg":3.58,"std":0.67,"valid":12},{"d":"2026-08-20","avg":5.17,"std":2.72,"valid":12},{"d":"2026-08-21","avg":3.92,"std":1.68,"valid":12},{"d":"2026-08-22","avg":4.17,"std":1.11,"valid":12,"avg_zero":4.17,"avg_max":13.67}]}

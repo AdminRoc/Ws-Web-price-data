@@ -1,1 +1,1 @@
-{"slug":"acid_shells","name":"Acid Shells","name_zh":"酸性弹药","category":"primary","days":[{"d":"2026-08-19","avg":11.0,"std":0.95,"valid":12},{"d":"2026-08-20","avg":10.83,"std":1.03,"valid":12},{"d":"2026-08-21","avg":10.67,"std":1.5,"valid":12}]}
+{"slug":"acid_shells","name":"Acid Shells","name_zh":"酸性弹药","category":"primary","days":[{"d":"2026-08-19","avg":11.0,"std":0.95,"valid":12},{"d":"2026-08-20","avg":10.83,"std":1.03,"valid":12},{"d":"2026-08-21","avg":10.67,"std":1.5,"valid":12},{"d":"2026-08-22","avg":10.25,"std":0.62,"valid":12,"avg_zero":10.25,"avg_max":18.0}]}

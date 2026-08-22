@@ -1,1 +1,1 @@
-{"slug":"steel_charge","name":"Steel Charge","name_zh":"钢铁充能","category":"mod","days":[{"d":"2026-08-19","avg":12.83,"std":1.53,"valid":12},{"d":"2026-08-20","avg":12.42,"std":2.19,"valid":12},{"d":"2026-08-21","avg":13.67,"std":1.97,"valid":12}]}
+{"slug":"steel_charge","name":"Steel Charge","name_zh":"钢铁充能","category":"mod","days":[{"d":"2026-08-19","avg":12.83,"std":1.53,"valid":12},{"d":"2026-08-20","avg":12.42,"std":2.19,"valid":12},{"d":"2026-08-21","avg":13.67,"std":1.97,"valid":12},{"d":"2026-08-22","avg":13.75,"std":1.54,"valid":12,"avg_zero":13.83,"avg_max":21.42}]}
