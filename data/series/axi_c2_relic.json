@@ -1,1 +1,1 @@
-{"slug":"axi_c2_relic","name":"Axi C2 Relic","name_zh":"后纪 C2 遗物","category":"relic","days":[{"d":"2026-08-19","avg":51.0,"std":66.0,"valid":4},{"d":"2026-08-20","avg":84.0,"std":93.34,"valid":2},{"d":"2026-08-22","avg":18.0,"std":0.0,"valid":2}]}
+{"slug":"axi_c2_relic","name":"Axi C2 Relic","name_zh":"后纪 C2 遗物","category":"relic","days":[{"d":"2026-08-19","avg":51.0,"std":66.0,"valid":4},{"d":"2026-08-20","avg":84.0,"std":93.34,"valid":2},{"d":"2026-08-22","avg":18.0,"std":0.0,"valid":2},{"d":"2026-08-23","avg":18.0,"std":null,"valid":1}]}
