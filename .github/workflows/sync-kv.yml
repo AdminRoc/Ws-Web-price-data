@@ -1,4 +1,4 @@
-name: 同步价格热点到 EdgeOne KV
+name: Sync price hotspots to EdgeOne KV
 
 on:
   workflow_dispatch:
