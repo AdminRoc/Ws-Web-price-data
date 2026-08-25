@@ -2,9 +2,6 @@ name: Sync price hotspots to EdgeOne KV
 
 on:
   workflow_dispatch:
-  workflow_run:
-    workflows: ["抓取快照并聚合日均价"]
-    types: [completed]
 
 concurrency:
   group: price-sync-kv
@@ -12,7 +9,6 @@ concurrency:
 
 jobs:
   sync:
-    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -22,28 +18,15 @@ jobs:
         env:
           KV_WRITE_TOKEN: ${{ secrets.KV_WRITE_TOKEN }}
           UPDATE_KV_URL: ${{ secrets.PRICE_UPDATE_KV_URL }}
-        run: |
-          set -euo pipefail
-          test -n "${KV_WRITE_TOKEN}" || { echo 'Missing KV_WRITE_TOKEN'; exit 1; }
-          test -n "${UPDATE_KV_URL}" || { echo 'Missing PRICE_UPDATE_KV_URL'; exit 1; }
-          pairs=(
-            "price_meta=data/meta/latest.json"
-            "price_items=data/meta/items.json"
-            "price_model_config=data/meta/model-config.json"
-            "price_table_latest=data/table/latest.json"
-          )
-          CN_DATE=$(TZ='Asia/Shanghai' date +%Y-%m-%d)
-          if [ -f "data/snapshots/${CN_DATE}.json" ]; then
-            pairs+=("price_today_snapshots=data/snapshots/${CN_DATE}.json")
-          fi
-          for pair in "${pairs[@]}"; do
-            key="${pair%%=*}"
-            file="${pair#*=}"
-            test -f "${file}" || { echo "Missing ${file}"; exit 1; }
-            python3 -c 'import json,sys; key,path=sys.argv[1:]; value=open(path,encoding="utf-8").read(); print(json.dumps({"key":key,"value":value},ensure_ascii=False))' "${key}" "${file}" > /tmp/price-kv-payload.json
-            curl --fail --retry 3 --max-time 300 -X POST "${UPDATE_KV_URL}" \
-              -H "Authorization: Bearer ${KV_WRITE_TOKEN}" \
-              -H 'Content-Type: application/json' \
-              --data-binary @/tmp/price-kv-payload.json
-            rm -f /tmp/price-kv-payload.json
+        run: >-
+          set -euo pipefail;
+          test -n "${KV_WRITE_TOKEN}" || { echo 'Missing KV_WRITE_TOKEN'; exit 1; };
+          test -n "${UPDATE_KV_URL}" || { echo 'Missing PRICE_UPDATE_KV_URL'; exit 1; };
+          for spec in price_meta=data/meta/latest.json price_items=data/meta/items.json price_model_config=data/meta/model-config.json price_table_latest=data/table/latest.json; do
+            key="${spec%%=*}";
+            file="${spec#*=}";
+            test -f "${file}" || { echo "Missing ${file}"; exit 1; };
+            python3 -c 'import json,sys; key,path=sys.argv[1:]; value=open(path,encoding="utf-8").read(); print(json.dumps({"key":key,"value":value},ensure_ascii=False))' "${key}" "${file}" > /tmp/price-kv-payload.json;
+            curl --fail --retry 3 --max-time 300 -X POST "${UPDATE_KV_URL}" -H "Authorization: Bearer ${KV_WRITE_TOKEN}" -H 'Content-Type: application/json' --data-binary @/tmp/price-kv-payload.json;
+            rm -f /tmp/price-kv-payload.json;
           done
