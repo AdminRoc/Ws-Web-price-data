@@ -18,7 +18,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: 写入 PRICE_KV 热点
+      - name: Write PRICE_KV hotspots
         env:
           KV_WRITE_TOKEN: ${{ secrets.KV_WRITE_TOKEN }}
           UPDATE_KV_URL: ${{ secrets.PRICE_UPDATE_KV_URL }}
