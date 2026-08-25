@@ -40,13 +40,7 @@ jobs:
             key="${pair%%=*}"
             file="${pair#*=}"
             test -f "${file}" || { echo "Missing ${file}"; exit 1; }
-            python3 - "${key}" "${file}" > /tmp/price-kv-payload.json <<'PY'
-            import json,sys
-            key,path=sys.argv[1:]
-            with open(path,encoding='utf-8') as f:
-                value=f.read()
-            print(json.dumps({'key':key,'value':value},ensure_ascii=False))
-            PY
+            python3 -c 'import json,sys; key,path=sys.argv[1:]; value=open(path,encoding="utf-8").read(); print(json.dumps({"key":key,"value":value},ensure_ascii=False))' "${key}" "${file}" > /tmp/price-kv-payload.json
             curl --fail --retry 3 --max-time 300 -X POST "${UPDATE_KV_URL}" \
               -H "Authorization: Bearer ${KV_WRITE_TOKEN}" \
               -H 'Content-Type: application/json' \
