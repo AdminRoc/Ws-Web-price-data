@@ -383,6 +383,7 @@ def build_table_bundle(items_meta):
             "name_zh": meta.get("name_zh") or meta.get("name") or slug,
             "category": meta.get("category") or "other",
             "max_rank": meta.get("maxRank") or 0,
+            "wm_deleted": meta.get("wm_deleted") is True,
         }
         entry.update(ma)
 

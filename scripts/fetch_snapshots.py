@@ -189,13 +189,15 @@ def _category(tags):
     return (list_tags[0] if list_tags else "other") or "other"
 
 
-def _item_meta(it):
+def _item_meta(it, previous=None):
+    previous = previous or {}
     i18n = it.get("i18n") or {}
     zh = (i18n.get("zh-hans") or i18n.get("zh") or {}).get("name") or ""
     en = (i18n.get("en") or {}).get("name") or it.get("item_name") or it.get("url_name") or ""
     return {
-        "name": en,
-        "name_zh": zh or en,
+        "name": en or previous.get("name") or it.get("slug"),
+        "name_zh": zh or previous.get("name_zh") or en or it.get("slug"),
+        "wm_deleted": False,
         "category": _category(it.get("tags")),
         "tags": it.get("tags") or [],
         "maxRank": it.get("maxRank") or 0,
@@ -321,8 +323,8 @@ async def run_pass(session, sem, limiter, tasks, max_ranks, results, failed, rou
     return timed_out
 
 
-def append_snapshot(date, batch_items, generated):
-    """向当日快照文件追加一个批次(读-改-写)。"""
+def append_snapshot(date, batch_items, generated, planned_items, error_items):
+    """向当日快照文件追加一个批次,保留质量与可回放信息。"""
     os.makedirs(SNAPSHOTS_DIR, exist_ok=True)
     snap_path = os.path.join(SNAPSHOTS_DIR, f"{date}.json")
     data = {}
@@ -333,7 +335,11 @@ def append_snapshot(date, batch_items, generated):
         except Exception:
             data = {}
     batches = data.get("batches") or []
-    batches.append({"time": generated, "items": batch_items})
+    batches.append({"time": generated, "planned_items": planned_items, "captured_items": len(batch_items), "error_items": error_items, "items": batch_items})
+    data["schema_version"] = SCHEMA_VERSION
+    data["generator_version"] = GENERATOR_VERSION
+    data["data_revision"] = DATA_REVISION
+    data["model_version"] = MODEL_VERSION
     data["date"] = date
     data["tz"] = "Asia/Shanghai (UTC+8)"
     data["generated"] = generated
@@ -412,9 +418,16 @@ async def main():
         slug = it["slug"]
         if slug in results:
             batch_items[slug] = results[slug]
-    append_snapshot(date, batch_items, generated)
+    error_items = sum(1 for value in results.values() if value.get("error"))
+    append_snapshot(date, batch_items, generated, len(items), error_items)
 
-    items_meta = {it["slug"]: _item_meta(it) for it in items}
+    previous_items = (load_json(ITEMS_OUT) or {}).get("items") or {}
+    items_meta = {it["slug"]: _item_meta(it, previous_items.get(it["slug"])) for it in items}
+    for slug, previous in previous_items.items():
+        if slug not in items_meta:
+            retained = dict(previous)
+            retained["wm_deleted"] = True
+            items_meta[slug] = retained
     write_items_manifest(items_meta)
 
 
