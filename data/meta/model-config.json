@@ -1,0 +1,7 @@
+{
+  "schema_version": 1,
+  "model_version": "price-model-v1",
+  "short": {"window1": 3, "window2": 14, "bandWindow": 14, "bandSigma": 2, "extremeVolRatio": 1.5, "longRefWindow": 30, "dataNeeded": 30},
+  "long": {"window1": 30, "window2": 90, "bandWindow": 90, "bandSigma": 2, "dataNeeded": 90},
+  "bollinger": {"window": 20, "sigma": 2}
+}
