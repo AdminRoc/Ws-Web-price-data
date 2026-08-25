@@ -22,7 +22,8 @@ jobs:
           set -euo pipefail;
           test -n "${KV_WRITE_TOKEN}" || { echo 'Missing KV_WRITE_TOKEN'; exit 1; };
           test -n "${UPDATE_KV_URL}" || { echo 'Missing PRICE_UPDATE_KV_URL'; exit 1; };
-          for spec in price_meta=data/meta/latest.json price_items=data/meta/items.json price_model_config=data/meta/model-config.json price_table_latest=data/table/latest.json; do
+          CN_DATE=$(python3 -c 'import json; print(json.load(open("data/meta/latest.json", encoding="utf-8"))["today"])');
+          for spec in price_meta=data/meta/latest.json price_items=data/meta/items.json price_model_config=data/meta/model-config.json price_table_latest=data/table/latest.json price_today_snapshots=data/snapshots/${CN_DATE}.json; do
             key="${spec%%=*}";
             file="${spec#*=}";
             test -f "${file}" || { echo "Missing ${file}"; exit 1; };
