@@ -69,6 +69,10 @@ ITEMS_RETRIES = 5
 PROGRESS_EVERY = 300
 
 DATA_DIR = os.environ.get("DATA_DIR", "data")
+SCHEMA_VERSION = 2
+GENERATOR_VERSION = "fetch-snapshots-v2"
+DATA_REVISION = os.environ.get("DATA_REVISION", "working-tree")
+MODEL_VERSION = "price-model-v1"
 SNAPSHOTS_DIR = os.path.join(DATA_DIR, "snapshots")
 ITEMS_OUT = os.path.join(DATA_DIR, "meta", "items.json")
 MAX_ITEMS = int(os.environ.get("MAX_ITEMS", "0") or 0)
