@@ -353,7 +353,7 @@ def build_table_bundle(items_meta):
 
     last_daily = daily_files[-1][:-5] if daily_files else None
     items = {}
-    all_slugs = set(series_by_slug) | set(today_series)
+    all_slugs = (set(series_by_slug) | set(today_series)) & set(items_meta or {})
     for slug in all_slugs:
         meta = (items_meta or {}).get(slug) or {}
         vals = [v for _, v in series_by_slug.get(slug, [])]          # 日均价序列
