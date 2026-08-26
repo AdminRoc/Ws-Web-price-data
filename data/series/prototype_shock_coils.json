@@ -1,1 +1,1 @@
-{"slug":"prototype_shock_coils","name":"Prototype Shock Coils","name_zh":"原型电击线圈","category":"secondary","days":[{"d":"2026-08-25","avg":190.0,"std":22.36,"valid":5,"avg_zero":187.5,"avg_max":200.0}]}
+{"slug":"prototype_shock_coils","name":"Prototype Shock Coils","name_zh":"原型电击线圈","category":"secondary","days":[{"d":"2026-08-25","avg":190.0,"std":22.36,"valid":5,"avg_zero":187.5,"avg_max":200.0},{"d":"2026-08-26","avg":152.71,"std":36.97,"valid":7,"avg_zero":149.86,"avg_max":180.0}]}
