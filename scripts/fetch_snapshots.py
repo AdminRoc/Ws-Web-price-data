@@ -137,6 +137,14 @@ def _cn_date():
     return datetime.now(TZ_CN).strftime("%Y-%m-%d")
 
 
+def load_json(path, default=None):
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return default
+
+
 def _backoff(attempt, resp=None):
     if resp is not None:
         try:
