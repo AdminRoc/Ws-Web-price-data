@@ -42,6 +42,10 @@ jobs:
         env:
           DATA_DIR: data
 
+      - name: 生成本次运行摘要
+        run: >-
+          python3 -c 'import json,os; m=json.load(open("data/meta/latest.json",encoding="utf-8")); s="### Price data summary\n"+"".join(f"- {k}: {m.get(k)}\n" for k in ("today","snapshot_batches_today","daily_count","total_items","table_items","data_revision","model_version")); print(s,end=""); p=os.environ.get("GITHUB_STEP_SUMMARY"); open(p,"a",encoding="utf-8").write(s) if p else None'
+
       - name: 提交并推送
         id: commit
         run: |
