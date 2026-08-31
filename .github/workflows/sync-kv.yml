@@ -32,5 +32,5 @@ jobs:
             python3 -c 'import json,sys; key,path=sys.argv[1:]; value=open(path,encoding="utf-8").read(); print(json.dumps({"key":key,"value":value},ensure_ascii=False))' "${key}" "${file}" > /tmp/price-kv-payload.json;
             curl --fail --retry 3 --max-time 300 -X POST "${UPDATE_KV_URL}" -H "Authorization: Bearer ${KV_WRITE_TOKEN}" -H 'Content-Type: application/json' --data-binary @/tmp/price-kv-payload.json;
             rm -f /tmp/price-kv-payload.json;
-          done
+          done;
           echo "skip price_table_latest (5.4MB 超 Edge 1MB 请求体，仅 cdn)"
