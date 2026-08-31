@@ -1,4 +1,4 @@
-name: Sync price hotspots to EdgeOne KV
+name: Sync price hotspots to EdgeOne KV (直写 KV，不经自定义域)
 
 on:
   workflow_dispatch:
@@ -14,22 +14,34 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
-      - name: Write PRICE_KV hotspots
+      - name: 拉取私库 kv_put 真源
+        uses: actions/checkout@v5
+        with:
+          repository: AdminRoc/Ws-Web-core
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          path: _private
+
+      - name: 覆盖 kv_put 到工作树
+        run: cp _private/.github/scripts/kv_put.py scripts/kv_put.py
+
+      - name: Write PRICE_KV hotspots (直写 KV，纯 KV 路线)
         env:
-          KV_WRITE_TOKEN: ${{ secrets.KV_WRITE_TOKEN }}
-          UPDATE_KV_URL: ${{ secrets.PRICE_UPDATE_KV_URL }}
+          TENCENTCLOUD_SECRET_ID: ${{ secrets.TENCENTCLOUD_SECRET_ID }}
+          TENCENTCLOUD_SECRET_KEY: ${{ secrets.TENCENTCLOUD_SECRET_KEY }}
+          ZONE_ID: ${{ secrets.ZONE_ID }}
+          KV_NAMESPACE: ${{ secrets.KV_NAMESPACE_PRICE }}
           PRICE_DATA_SECRET: ${{ secrets.PRICE_DATA_SECRET }}
-        run: >-
-          set -euo pipefail;
-          test -n "${KV_WRITE_TOKEN}" || { echo 'Missing KV_WRITE_TOKEN'; exit 1; };
-          test -n "${UPDATE_KV_URL}" || { echo 'Missing PRICE_UPDATE_KV_URL'; exit 1; };
-          pip install cryptography -q;
-          CN_DATE=$(python3 -c 'import sys; sys.path.insert(0, "scripts"); import crypto_price, json; j=crypto_price.load_json("data/meta/latest.json") or json.load(open("data/meta/latest.json",encoding="utf-8")); print(j["today"])');
+        run: |
+          set -euo pipefail
+          test -n "${TENCENTCLOUD_SECRET_ID}" || { echo 'Missing TENCENTCLOUD_SECRET_ID'; exit 1; }
+          test -n "${TENCENTCLOUD_SECRET_KEY}" || { echo 'Missing TENCENTCLOUD_SECRET_KEY'; exit 1; }
+          test -n "${ZONE_ID}" || { echo 'Missing ZONE_ID'; exit 1; }
+          test -n "${KV_NAMESPACE}" || { echo 'Missing KV_NAMESPACE_PRICE'; exit 1; }
+          pip install -q tencentcloud-sdk-python cryptography
+          CN_DATE=$(python3 -c 'import sys; sys.path.insert(0, "scripts"); import crypto_price, json; j=crypto_price.load_json("data/meta/latest.json") or json.load(open("data/meta/latest.json",encoding="utf-8")); print(j["today"])')
           for spec in price_meta=data/meta/latest.json price_items=data/meta/items.json price_model_config=data/meta/model-config.json price_table_latest=data/table/latest.json price_today_snapshots=data/snapshots/${CN_DATE}.json; do
-            key="${spec%%=*}";
-            file="${spec#*=}";
-            test -f "${file}" || { echo "Missing ${file}"; exit 1; };
-            python3 -c 'import json,sys; key,path=sys.argv[1:]; value=open(path,encoding="utf-8").read(); print(json.dumps({"key":key,"value":value},ensure_ascii=False))' "${key}" "${file}" > /tmp/price-kv-payload.json;
-            curl --fail --retry 3 --max-time 300 -X POST "${UPDATE_KV_URL}" -H "Authorization: Bearer ${KV_WRITE_TOKEN}" -H 'Content-Type: application/json' --data-binary @/tmp/price-kv-payload.json;
-            rm -f /tmp/price-kv-payload.json;
+            key="${spec%%=*}"; file="${spec#*=}";
+            test -f "${file}" || { echo "Missing ${file}"; exit 1; }
+            # 仅公库暴露内容（已加密包装，直接 put 密文）
+            python3 scripts/kv_put.py --zone "${ZONE_ID}" --ns "${KV_NAMESPACE}" --key "${key}" --file "${file}"
           done
