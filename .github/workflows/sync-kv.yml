@@ -1,4 +1,4 @@
-name: Sync price hotspots to EdgeOne KV (直写 KV，不经自定义域)
+name: Sync price hotspots to EdgeOne KV
 
 on:
   workflow_dispatch:
@@ -14,35 +14,22 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
-      - name: Write PRICE_KV hotspots (纯KV直写，兼容旧 HTTP 回退)
+      - name: Write PRICE_KV hotspots
         env:
-          TENCENTCLOUD_SECRET_ID: ${{ secrets.TENCENTCLOUD_SECRET_ID }}
-          TENCENTCLOUD_SECRET_KEY: ${{ secrets.TENCENTCLOUD_SECRET_KEY }}
-          ZONE_ID: ${{ secrets.ZONE_ID }}
-          KV_NAMESPACE: ${{ secrets.KV_NAMESPACE_PRICE }}
-          PRICE_DATA_SECRET: ${{ secrets.PRICE_DATA_SECRET }}
           KV_WRITE_TOKEN: ${{ secrets.KV_WRITE_TOKEN }}
           UPDATE_KV_URL: ${{ secrets.PRICE_UPDATE_KV_URL }}
-        run: |
-          set -euo pipefail
-          pip install -q tencentcloud-sdk-python cryptography
-          CN_DATE=$(python3 -c 'import sys; sys.path.insert(0, "scripts"); import crypto_price, json; j=crypto_price.load_json("data/meta/latest.json") or json.load(open("data/meta/latest.json",encoding="utf-8")); print(j["today"])')
-          # 优先直写 KV（需 TENCENTCLOUD_*），否则回退旧 HTTP 方式（需 KV_WRITE_TOKEN）
-          if [ -n "${TENCENTCLOUD_SECRET_ID:-}" ] && [ -n "${TENCENTCLOUD_SECRET_KEY:-}" ] && [ -n "${ZONE_ID:-}" ] && [ -n "${KV_NAMESPACE:-}" ]; then
-            echo "直写 KV via TencentCloud API"
-            for spec in price_meta=data/meta/latest.json price_items=data/meta/items.json price_model_config=data/meta/model-config.json price_table_latest=data/table/latest.json price_today_snapshots=data/snapshots/${CN_DATE}.json; do
-              key="${spec%%=*}"; file="${spec#*=}";
-              test -f "${file}" || { echo "Missing ${file}"; exit 1; }
-              python3 scripts/kv_put.py --zone "${ZONE_ID}" --ns "${KV_NAMESPACE}" --key "${key}" --file "${file}"
-            done
-          elif [ -n "${KV_WRITE_TOKEN:-}" ] && [ -n "${UPDATE_KV_URL:-}" ]; then
-            echo "回退 HTTP POST ${UPDATE_KV_URL} (直写 KV Secrets 未全)"
-            for spec in price_meta=data/meta/latest.json price_items=data/meta/items.json price_model_config=data/meta/model-config.json price_table_latest=data/table/latest.json price_today_snapshots=data/snapshots/${CN_DATE}.json; do
-              key="${spec%%=*}"; file="${spec#*=}";
-              test -f "${file}" || { echo "Missing ${file}"; exit 1; }
-              python3 -c 'import json,sys; key,path=sys.argv[1:]; value=open(path,encoding="utf-8").read(); print(json.dumps({"key":key,"value":value},ensure_ascii=False))' "${key}" "${file}" > /tmp/payload.json
-              curl --fail --retry 3 --max-time 300 -X POST "${UPDATE_KV_URL}" -H "Authorization: Bearer ${KV_WRITE_TOKEN}" -H 'Content-Type: application/json' --data-binary @/tmp/payload.json
-            done
-          else
-            echo "Missing KV credentials (neither TENCENTCLOUD_* nor KV_WRITE_TOKEN/UPDATE_KV_URL)"; exit 1
-          fi
+          PRICE_DATA_SECRET: ${{ secrets.PRICE_DATA_SECRET }}
+        run: >-
+          set -euo pipefail;
+          test -n "${KV_WRITE_TOKEN}" || { echo 'Missing KV_WRITE_TOKEN'; exit 1; };
+          test -n "${UPDATE_KV_URL}" || { echo 'Missing PRICE_UPDATE_KV_URL'; exit 1; };
+          pip install -q cryptography;
+          CN_DATE=$(python3 -c 'import sys; sys.path.insert(0, "scripts"); import crypto_price, json; j=crypto_price.load_json("data/meta/latest.json") or json.load(open("data/meta/latest.json",encoding="utf-8")); print(j["today"])');
+          for spec in price_meta=data/meta/latest.json price_items=data/meta/items.json price_model_config=data/meta/model-config.json price_table_latest=data/table/latest.json price_today_snapshots=data/snapshots/${CN_DATE}.json; do
+            key="${spec%%=*}";
+            file="${spec#*=}";
+            test -f "${file}" || { echo "Missing ${file}"; exit 1; };
+            python3 -c 'import json,sys; key,path=sys.argv[1:]; value=open(path,encoding="utf-8").read(); print(json.dumps({"key":key,"value":value},ensure_ascii=False))' "${key}" "${file}" > /tmp/price-kv-payload.json;
+            curl --fail --retry 3 --max-time 300 -X POST "${UPDATE_KV_URL}" -H "Authorization: Bearer ${KV_WRITE_TOKEN}" -H 'Content-Type: application/json' --data-binary @/tmp/price-kv-payload.json;
+            rm -f /tmp/price-kv-payload.json;
+          done
