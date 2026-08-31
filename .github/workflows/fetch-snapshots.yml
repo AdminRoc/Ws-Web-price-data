@@ -52,7 +52,7 @@ jobs:
       - name: 校验回环（阻断失真）
         run: |
           python3 -c "
-          import crypto_price, glob, json, sys, os
+          import glob, json, sys, os
           sys.path.insert(0, 'scripts')
           import crypto_price
           files = glob.glob('data/**/*.json', recursive=True)
