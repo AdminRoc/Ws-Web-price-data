@@ -18,11 +18,13 @@ jobs:
         env:
           KV_WRITE_TOKEN: ${{ secrets.KV_WRITE_TOKEN }}
           UPDATE_KV_URL: ${{ secrets.PRICE_UPDATE_KV_URL }}
+          PRICE_DATA_SECRET: ${{ secrets.PRICE_DATA_SECRET }}
         run: >-
           set -euo pipefail;
           test -n "${KV_WRITE_TOKEN}" || { echo 'Missing KV_WRITE_TOKEN'; exit 1; };
           test -n "${UPDATE_KV_URL}" || { echo 'Missing PRICE_UPDATE_KV_URL'; exit 1; };
-          CN_DATE=$(python3 -c 'import json; print(json.load(open("data/meta/latest.json", encoding="utf-8"))["today"])');
+          pip install cryptography -q;
+          CN_DATE=$(python3 -c 'import sys; sys.path.insert(0, "scripts"); import crypto_price, json; j=crypto_price.load_json("data/meta/latest.json") or json.load(open("data/meta/latest.json",encoding="utf-8")); print(j["today"])');
           for spec in price_meta=data/meta/latest.json price_items=data/meta/items.json price_model_config=data/meta/model-config.json price_table_latest=data/table/latest.json price_today_snapshots=data/snapshots/${CN_DATE}.json; do
             key="${spec%%=*}";
             file="${spec#*=}";
