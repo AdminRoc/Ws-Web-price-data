@@ -30,21 +30,54 @@ jobs:
           fetch-depth: 1
 
       - name: 安装依赖
-        run: pip install aiohttp -q
+        run: pip install aiohttp cryptography -q
 
       - name: 抓取全量快照
         run: python3 scripts/fetch_snapshots.py
         env:
           DATA_DIR: data
+          PRICE_DATA_SECRET: ${{ secrets.PRICE_DATA_SECRET }}
 
       - name: 聚合日均价并重建 bundle(幂等)
         run: python3 scripts/aggregate_daily.py
         env:
           DATA_DIR: data
+          PRICE_DATA_SECRET: ${{ secrets.PRICE_DATA_SECRET }}
+
+      - name: 兜底加密（仅公库暴露内容，幂等，含历史明文补加密）
+        run: python3 scripts/encrypt_price.py --all
+        env:
+          PRICE_DATA_SECRET: ${{ secrets.PRICE_DATA_SECRET }}
+
+      - name: 校验回环（阻断失真）
+        run: |
+          python3 -c "
+          import crypto_price, glob, json, sys, os
+          sys.path.insert(0, 'scripts')
+          import crypto_price
+          files = glob.glob('data/**/*.json', recursive=True)
+          bad = []
+          for p in files:
+              if not p.endswith('.json'): continue
+              try:
+                  obj = crypto_price.load_json(p)
+                  if obj is None:
+                      bad.append(p+': load fail')
+                      continue
+                  # 包装校验：若为加密文件则必能解密且 sha256 一致（crypto_price 内部已校验）
+                  raw = crypto_price.load_raw(p)
+                  if isinstance(raw, dict) and raw.get('ct'):
+                      assert raw.get('sha256'), 'missing sha256'
+              except Exception as e:
+                  bad.append(p+': '+str(e))
+          if bad:
+              print('VERIFY FAIL:' + '\n'.join(bad)); sys.exit(1)
+          print(f'VERIFY OK: {len(files)} json files')
+          "
 
       - name: 生成本次运行摘要
         run: >-
-          python3 -c 'import json,os; m=json.load(open("data/meta/latest.json",encoding="utf-8")); s="### Price data summary\n"+"".join(f"- {k}: {m.get(k)}\n" for k in ("today","snapshot_batches_today","daily_count","total_items","table_items","data_revision","model_version")); print(s,end=""); p=os.environ.get("GITHUB_STEP_SUMMARY"); open(p,"a",encoding="utf-8").write(s) if p else None'
+          python3 -c 'import sys; sys.path.insert(0, "scripts"); import crypto_price, json, os; m=crypto_price.load_json("data/meta/latest.json"); s="### Price data summary\n"+"".join(f"- {k}: {m.get(k)}\n" for k in ("today","snapshot_batches_today","daily_count","total_items","table_items","data_revision","model_version")) if m else "no meta"; print(s,end=""); p=os.environ.get("GITHUB_STEP_SUMMARY"); open(p,"a",encoding="utf-8").write(s) if p else None'
 
       - name: 提交并推送
         id: commit

@@ -81,6 +81,15 @@ def _mean(vals):
 
 
 def load_json(path, default=None):
+    # 兼容加密：优先走 crypto_price 透传解密，无 SECRET 时回退明文
+    if os.environ.get("PRICE_DATA_SECRET"):
+        try:
+            import crypto_price as _cp
+            v = _cp.load_json(path)
+            if v is not None:
+                return v
+        except Exception:
+            pass
     try:
         with open(path, "r", encoding="utf-8") as f:
             return json.load(f)
@@ -89,6 +98,14 @@ def load_json(path, default=None):
 
 
 def save_json(path, obj):
+    # 若有 SECRET 则加密包装（仅公库暴露内容），否则明文
+    if os.environ.get("PRICE_DATA_SECRET"):
+        try:
+            import crypto_price as _cp
+            _cp.save_json_encrypt(path, obj)
+            return
+        except Exception as e:
+            print(f"  WARN 加密失败回退明文 {path}: {e}", flush=True)
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
         json.dump(obj, f, ensure_ascii=False, separators=(",", ":"))

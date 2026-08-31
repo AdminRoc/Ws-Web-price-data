@@ -138,7 +138,17 @@ def _cn_date():
 
 
 def load_json(path, default=None):
+    # 兼容加密：若文件为 {"v":1,"alg":"AES-GCM",...} 包装则透传解密，否则按明文
     try:
+        # 优先走 crypto_price（需 PRICE_DATA_SECRET），无 SECRET 时回退明文
+        if os.environ.get("PRICE_DATA_SECRET"):
+            try:
+                import crypto_price as _cp
+                v = _cp.load_json(path)
+                if v is not None:
+                    return v
+            except Exception:
+                pass
         with open(path, "r", encoding="utf-8") as f:
             return json.load(f)
     except (OSError, ValueError):
@@ -336,16 +346,10 @@ async def run_pass(session, sem, limiter, tasks, max_ranks, results, failed, rou
 
 
 def append_snapshot(date, batch_items, generated, planned_items, error_items):
-    """向当日快照文件追加一个批次,保留质量与可回放信息。"""
+    """向当日快照文件追加一个批次,保留质量与可回放信息。兼容加密：读时解密、写时若有 SECRET 则加密包装。"""
     os.makedirs(SNAPSHOTS_DIR, exist_ok=True)
     snap_path = os.path.join(SNAPSHOTS_DIR, f"{date}.json")
-    data = {}
-    if os.path.exists(snap_path):
-        try:
-            with open(snap_path, "r", encoding="utf-8") as f:
-                data = json.load(f) or {}
-        except Exception:
-            data = {}
+    data = load_json(snap_path, default={}) or {}
     batches = data.get("batches") or []
     batches.append({"time": generated, "planned_items": planned_items, "captured_items": len(batch_items), "error_items": error_items, "items": batch_items})
     data["schema_version"] = SCHEMA_VERSION
@@ -356,6 +360,15 @@ def append_snapshot(date, batch_items, generated, planned_items, error_items):
     data["tz"] = "Asia/Shanghai (UTC+8)"
     data["generated"] = generated
     data["batches"] = batches
+    # 写时：若有 SECRET 则加密包装（仅公库暴露内容），否则明文（私库/本地冒烟）
+    if os.environ.get("PRICE_DATA_SECRET"):
+        try:
+            import crypto_price as _cp
+            _cp.save_json_encrypt(snap_path, data)
+            print(f"  已追加批次(加密) → {snap_path} (共 {len(batches)} 个批次,{len(batch_items)} 物品)", flush=True)
+            return
+        except Exception as e:
+            print(f"  WARN 加密失败回退明文: {e}", flush=True)
     with open(snap_path, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, separators=(",", ":"))
     print(f"  已追加批次 → {snap_path} (共 {len(batches)} 个批次,{len(batch_items)} 物品)", flush=True)
@@ -368,6 +381,14 @@ def write_items_manifest(items_meta):
         "source": DIRECT_URL + "/v2/items",
         "items": items_meta,
     }
+    if os.environ.get("PRICE_DATA_SECRET"):
+        try:
+            import crypto_price as _cp
+            _cp.save_json_encrypt(ITEMS_OUT, manifest)
+            print(f"  已写入物品清单(加密) → {ITEMS_OUT} ({len(items_meta)} 物品)", flush=True)
+            return
+        except Exception as e:
+            print(f"  WARN 加密失败回退明文: {e}", flush=True)
     with open(ITEMS_OUT, "w", encoding="utf-8") as f:
         json.dump(manifest, f, ensure_ascii=False, separators=(",", ":"))
     print(f"  已写入物品清单 → {ITEMS_OUT} ({len(items_meta)} 物品)", flush=True)
