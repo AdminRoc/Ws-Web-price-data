@@ -50,6 +50,8 @@ jobs:
           PRICE_DATA_SECRET: ${{ secrets.PRICE_DATA_SECRET }}
 
       - name: 校验回环（阻断失真）
+        env:
+          PRICE_DATA_SECRET: ${{ secrets.PRICE_DATA_SECRET }}
         run: |
           python3 -c "
           import glob, json, sys, os
@@ -76,6 +78,8 @@ jobs:
           "
 
       - name: 生成本次运行摘要
+        env:
+          PRICE_DATA_SECRET: ${{ secrets.PRICE_DATA_SECRET }}
         run: >-
           python3 -c 'import sys; sys.path.insert(0, "scripts"); import crypto_price, json, os; m=crypto_price.load_json("data/meta/latest.json"); s="### Price data summary\n"+"".join(f"- {k}: {m.get(k)}\n" for k in ("today","snapshot_batches_today","daily_count","total_items","table_items","data_revision","model_version")) if m else "no meta"; print(s,end=""); p=os.environ.get("GITHUB_STEP_SUMMARY"); open(p,"a",encoding="utf-8").write(s) if p else None'
 
