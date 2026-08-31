@@ -14,17 +14,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
-      - name: 拉取私库 kv_put 真源
-        uses: actions/checkout@v5
-        with:
-          repository: AdminRoc/Ws-Web-core
-          token: ${{ secrets.PRIVATE_REPO_PAT }}
-          path: _private
-
-      - name: 覆盖 kv_put 到工作树
-        run: cp _private/.github/scripts/kv_put.py scripts/kv_put.py
-
-      - name: Write PRICE_KV hotspots (直写 KV，纯 KV 路线)
+      - name: Write PRICE_KV hotspots (直写 KV，纯 KV 路线，本地已提交 kv_put 真源)
         env:
           TENCENTCLOUD_SECRET_ID: ${{ secrets.TENCENTCLOUD_SECRET_ID }}
           TENCENTCLOUD_SECRET_KEY: ${{ secrets.TENCENTCLOUD_SECRET_KEY }}
