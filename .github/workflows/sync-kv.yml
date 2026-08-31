@@ -25,7 +25,7 @@ jobs:
           test -n "${UPDATE_KV_URL}" || { echo 'Missing PRICE_UPDATE_KV_URL'; exit 1; };
           pip install -q cryptography;
           CN_DATE=$(python3 -c 'import sys; sys.path.insert(0, "scripts"); import crypto_price, json; j=crypto_price.load_json("data/meta/latest.json") or json.load(open("data/meta/latest.json",encoding="utf-8")); print(j["today"])');
-          for spec in price_meta=data/meta/latest.json price_items=data/meta/items.json price_model_config=data/meta/model-config.json price_table_latest=data/table/latest.json price_today_snapshots=data/snapshots/${CN_DATE}.json; do
+          for spec in price_meta=data/meta/latest.json price_items=data/meta/items.json price_model_config=data/meta/model-config.json price_today_snapshots=data/snapshots/${CN_DATE}.json; do
             key="${spec%%=*}";
             file="${spec#*=}";
             test -f "${file}" || { echo "Missing ${file}"; exit 1; };
@@ -33,3 +33,4 @@ jobs:
             curl --fail --retry 3 --max-time 300 -X POST "${UPDATE_KV_URL}" -H "Authorization: Bearer ${KV_WRITE_TOKEN}" -H 'Content-Type: application/json' --data-binary @/tmp/price-kv-payload.json;
             rm -f /tmp/price-kv-payload.json;
           done
+          echo "skip price_table_latest (5.4MB 超 Edge 1MB 请求体，仅 cdn)"
