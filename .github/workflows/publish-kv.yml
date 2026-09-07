@@ -1,0 +1,54 @@
+name: Publish current price data to EdgeOne KV
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: Type PUBLISH to write the current committed plaintext data to wfspeed-price KV.
+        required: true
+
+concurrency:
+  group: price-data
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: inputs.confirm == 'PUBLISH'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Validate and publish current plaintext data
+        env:
+          KV_WRITE_TOKEN: ${{ secrets.KV_WRITE_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "${KV_WRITE_TOKEN}" || { echo 'Missing KV_WRITE_TOKEN'; exit 1; }
+          publish() {
+            local key="$1"
+            local file="$2"
+            local payload="/tmp/${key}.json"
+            test -f "$file" || { echo "Missing $file"; return 1; }
+            python3 - "$key" "$file" "$payload" <<'PY'
+          import json, pathlib, sys
+          key, source, target = sys.argv[1:]
+          value = pathlib.Path(source).read_text(encoding='utf-8')
+          data = json.loads(value)
+          if isinstance(data, dict) and data.get('ct'):
+              raise SystemExit(source + ' is still encrypted')
+          pathlib.Path(target).write_text(json.dumps({'key': key, 'value': value}, ensure_ascii=False), encoding='utf-8')
+          PY
+            curl --fail-with-body --retry 3 --retry-all-errors --max-time 300 \
+              -X POST 'https://price.wfspeed.run/api/update-kv' \
+              -H "Authorization: Bearer ${KV_WRITE_TOKEN}" \
+              -H 'Content-Type: application/json' --data-binary "@$payload"
+            rm -f "$payload"
+          }
+          CN_DATE=$(python3 -c 'import json; print(json.load(open("data/meta/latest.json",encoding="utf-8"))["today"])')
+          publish price_items data/meta/items.json
+          publish price_model_config data/meta/model-config.json
+          publish price_today_snapshots "data/snapshots/${CN_DATE}.json"
+          publish price_table_index data/table/kv-index.json
+          for part in data/table/kv/*.json; do
+            publish "price_table_chunk_$(basename "$part" .json)" "$part"
+          done
+          publish price_meta data/meta/latest.json

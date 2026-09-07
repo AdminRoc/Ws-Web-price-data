@@ -122,7 +122,9 @@ jobs:
           set -euo pipefail
           test -n "${KV_WRITE_TOKEN}" || { echo 'Missing KV_WRITE_TOKEN'; exit 1; }
           publish() {
-            local key="$1" file="$2" payload="/tmp/${key}.json"
+            local key="$1"
+            local file="$2"
+            local payload="/tmp/${key}.json"
             test -f "$file" || { echo "Missing $file"; return 1; }
             python3 - "$key" "$file" "$payload" <<'PY'
           import json, pathlib, sys
