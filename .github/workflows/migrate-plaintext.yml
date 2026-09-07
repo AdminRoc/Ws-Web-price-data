@@ -1,0 +1,84 @@
+name: Migrate price data to plaintext
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: Type PLAINTEXT to convert the current tracked data files in place.
+        required: true
+
+concurrency:
+  group: price-data
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  migrate:
+    if: inputs.confirm == 'PLAINTEXT'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - run: pip install cryptography -q
+      - name: Convert existing artifacts without changing paths
+        env:
+          PRICE_DATA_SECRET: ${{ secrets.PRICE_DATA_SECRET }}
+        run: python3 scripts/encrypt_price.py --decrypt-all
+      - name: Validate plaintext artifacts
+        run: |
+          python3 - <<'PY'
+          import glob, json
+          bad = []
+          for path in glob.glob('data/**/*.json', recursive=True):
+              obj = json.load(open(path, encoding='utf-8'))
+              if isinstance(obj, dict) and obj.get('ct'):
+                  bad.append(path)
+          if bad:
+              raise SystemExit('encrypted files remain: ' + ', '.join(bad))
+          print('all tracked data artifacts are plaintext JSON')
+          PY
+      - name: Rebuild current table KV shards from preserved daily history
+        env:
+          DATA_DIR: data
+          # Existing encrypted artifacts use this legacy revision; keep it during
+          # the one-time conversion so items, meta and table remain compatible.
+          DATA_REVISION: working-tree
+        run: python3 scripts/aggregate_daily.py --refresh-bundle
+      - name: Commit migration
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/
+          git diff --staged --quiet && exit 0
+          git commit -m "data: migrate current price artifacts to plaintext [skip ci]"
+          git pull --rebase origin main
+          git push origin main
+      - name: Publish current plaintext data to wfspeed-price KV
+        env:
+          KV_WRITE_TOKEN: ${{ secrets.KV_WRITE_TOKEN }}
+        run: |
+          set -euo pipefail
+          publish() {
+            local key="$1" file="$2" payload="/tmp/${key}.json"
+            python3 - "$key" "$file" "$payload" <<'PY'
+          import json, pathlib, sys
+          key, source, target = sys.argv[1:]
+          value = pathlib.Path(source).read_text(encoding='utf-8')
+          json.loads(value)
+          pathlib.Path(target).write_text(json.dumps({'key': key, 'value': value}, ensure_ascii=False), encoding='utf-8')
+          PY
+            curl --fail-with-body --retry 3 --retry-all-errors --max-time 300 \
+              -X POST 'https://price.wfspeed.run/api/update-kv' \
+              -H "Authorization: Bearer ${KV_WRITE_TOKEN}" \
+              -H 'Content-Type: application/json' --data-binary "@$payload"
+          }
+          CN_DATE=$(python3 -c 'import json; print(json.load(open("data/meta/latest.json",encoding="utf-8"))["today"])')
+          publish price_items data/meta/items.json
+          publish price_model_config data/meta/model-config.json
+          publish price_today_snapshots "data/snapshots/${CN_DATE}.json"
+          publish price_table_index data/table/kv-index.json
+          for part in data/table/kv/*.json; do publish "price_table_chunk_$(basename "$part" .json)" "$part"; done
+          publish price_meta data/meta/latest.json

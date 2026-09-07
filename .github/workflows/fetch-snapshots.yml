@@ -6,21 +6,24 @@ name: 抓取快照并聚合日均价
 #   3) 重建表格 bundle(data/table/latest.json,含今日临时均价与预测)+ meta
 #   4) 清理过期文件(snapshots 7 天 / daily+series 1000 天)
 #   5) 有变动提交;jsDelivr purge 立即生效
-# 站点(Ws-Web-price)经 jsDelivr 多源引用。
+# 站点优先读取 wfspeed-price 的 EdgeOne KV，公开数据仓用于回退和历史保留。
 
 on:
   workflow_dispatch:
   schedule:
-    - cron: '15 */2 * * *'   # 每 2 小时第 15 分(UTC);脚本内另有 0~3min 随机延迟错峰
+    - cron: "15 */2 * * *" # 每 2 小时第 15 分(UTC);脚本内另有 0~3min 随机延迟错峰
 
 concurrency:
   group: price-data
-  cancel-in-progress: true   # 上一轮未跑完时直接取消,避免积压排队
+  cancel-in-progress: false
 
 jobs:
   fetch:
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    env:
+      DATA_DIR: data
+      DATA_REVISION: ${{ github.run_id }}
     permissions:
       contents: write
     steps:
@@ -30,58 +33,41 @@ jobs:
           fetch-depth: 1
 
       - name: 安装依赖
-        run: pip install aiohttp cryptography -q
+        run: pip install aiohttp -q
 
       - name: 抓取全量快照
         run: python3 scripts/fetch_snapshots.py
         env:
-          DATA_DIR: data
+          # Legacy read-only compatibility until the one-time plaintext migration finishes.
           PRICE_DATA_SECRET: ${{ secrets.PRICE_DATA_SECRET }}
 
       - name: 聚合日均价并重建 bundle(幂等)
         run: python3 scripts/aggregate_daily.py
         env:
-          DATA_DIR: data
+          # Legacy read-only compatibility until the one-time plaintext migration finishes.
           PRICE_DATA_SECRET: ${{ secrets.PRICE_DATA_SECRET }}
 
-      - name: 兜底加密（仅公库暴露内容，幂等，含历史明文补加密）
-        run: python3 scripts/encrypt_price.py --all
-        env:
-          PRICE_DATA_SECRET: ${{ secrets.PRICE_DATA_SECRET }}
-
-      - name: 校验回环（阻断失真）
-        env:
-          PRICE_DATA_SECRET: ${{ secrets.PRICE_DATA_SECRET }}
+      - name: 校验明文数据与核心结构
         run: |
           python3 -c "
-          import glob, json, sys, os
-          sys.path.insert(0, 'scripts')
-          import crypto_price
+          import glob, json, sys
           files = glob.glob('data/**/*.json', recursive=True)
           bad = []
           for p in files:
-              if not p.endswith('.json'): continue
-              try:
-                  obj = crypto_price.load_json(p)
-                  if obj is None:
-                      bad.append(p+': load fail')
-                      continue
-                  # 包装校验：若为加密文件则必能解密且 sha256 一致（crypto_price 内部已校验）
-                  raw = crypto_price.load_raw(p)
-                  if isinstance(raw, dict) and raw.get('ct'):
-                      assert raw.get('sha256'), 'missing sha256'
-              except Exception as e:
-                  bad.append(p+': '+str(e))
+            try:
+              obj = json.load(open(p, encoding='utf-8'))
+              if isinstance(obj, dict) and obj.get('ct'):
+                bad.append(p+': encrypted wrapper')
+            except Exception as e:
+              bad.append(p+': '+str(e))
           if bad:
               print('VERIFY FAIL:' + '\n'.join(bad)); sys.exit(1)
           print(f'VERIFY OK: {len(files)} json files')
           "
 
       - name: 生成本次运行摘要
-        env:
-          PRICE_DATA_SECRET: ${{ secrets.PRICE_DATA_SECRET }}
         run: >-
-          python3 -c 'import sys; sys.path.insert(0, "scripts"); import crypto_price, json, os; m=crypto_price.load_json("data/meta/latest.json"); s="### Price data summary\n"+"".join(f"- {k}: {m.get(k)}\n" for k in ("today","snapshot_batches_today","daily_count","total_items","table_items","data_revision","model_version")) if m else "no meta"; print(s,end=""); p=os.environ.get("GITHUB_STEP_SUMMARY"); open(p,"a",encoding="utf-8").write(s) if p else None'
+          python3 -c 'import json, os; m=json.load(open("data/meta/latest.json",encoding="utf-8")); s="### Price data summary\n"+"".join(f"- {k}: {m.get(k)}\n" for k in ("today","snapshot_batches_today","daily_count","total_items","table_items")); print(s,end=""); p=os.environ.get("GITHUB_STEP_SUMMARY"); open(p,"a",encoding="utf-8").write(s) if p else None'
 
       - name: 提交并推送
         id: commit
@@ -128,3 +114,37 @@ jobs:
             "data/daily/${CN_YDAY}.json" ; do
             curl -s "https://purge.jsdelivr.net/gh/AdminRoc/Ws-Web-price-data@main/${f}" || true
           done
+
+      - name: 写入 wfspeed-price EdgeOne KV
+        env:
+          KV_WRITE_TOKEN: ${{ secrets.KV_WRITE_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "${KV_WRITE_TOKEN}" || { echo 'Missing KV_WRITE_TOKEN'; exit 1; }
+          publish() {
+            local key="$1" file="$2" payload="/tmp/${key}.json"
+            test -f "$file" || { echo "Missing $file"; return 1; }
+            python3 - "$key" "$file" "$payload" <<'PY'
+          import json, pathlib, sys
+          key, source, target = sys.argv[1:]
+          value = pathlib.Path(source).read_text(encoding='utf-8')
+          json.loads(value)
+          pathlib.Path(target).write_text(json.dumps({'key': key, 'value': value}, ensure_ascii=False), encoding='utf-8')
+          PY
+            curl --fail-with-body --retry 3 --retry-all-errors --max-time 300 \
+              -X POST 'https://price.wfspeed.run/api/update-kv' \
+              -H "Authorization: Bearer ${KV_WRITE_TOKEN}" \
+              -H 'Content-Type: application/json' --data-binary "@$payload"
+            rm -f "$payload"
+          }
+          CN_DATE=$(python3 -c 'import json; print(json.load(open("data/meta/latest.json",encoding="utf-8"))["today"])')
+          publish price_items data/meta/items.json
+          publish price_model_config data/meta/model-config.json
+          publish price_today_snapshots "data/snapshots/${CN_DATE}.json"
+          publish price_table_index data/table/kv-index.json
+          for part in data/table/kv/*.json; do
+            key="price_table_chunk_$(basename "$part" .json)"
+            publish "$key" "$part"
+          done
+          # Meta is published last and therefore acts as the ready marker for the frontend.
+          publish price_meta data/meta/latest.json

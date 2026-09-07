@@ -29,10 +29,15 @@ import sys
 from datetime import datetime, timezone, timedelta
 
 DATA_DIR = os.environ.get("DATA_DIR", "data")
+DATA_REVISION = os.environ.get("DATA_REVISION", "")
+SCHEMA_VERSION = 2
+MODEL_VERSION = "price-model-v1"
 SNAPSHOTS_DIR = os.path.join(DATA_DIR, "snapshots")
 DAILY_DIR = os.path.join(DATA_DIR, "daily")
 SERIES_DIR = os.path.join(DATA_DIR, "series")
 TABLE_OUT = os.path.join(DATA_DIR, "table", "latest.json")
+TABLE_KV_DIR = os.path.join(DATA_DIR, "table", "kv")
+TABLE_KV_INDEX = os.path.join(DATA_DIR, "table", "kv-index.json")
 META_OUT = os.path.join(DATA_DIR, "meta", "latest.json")
 ITEMS_IN = os.path.join(DATA_DIR, "meta", "items.json")
 
@@ -42,6 +47,7 @@ SNAPSHOT_RETENTION_DAYS = 7
 DAILY_RETENTION_DAYS = 1000
 SERIES_RETENTION_DAYS = 1000
 TABLE_MAX_DAYS = 180   # 表格 MA90 + chg90(双窗口)所需上限
+TABLE_KV_CHUNK_SIZE = 200
 
 # 预测模型参数(与站点 js/model-config.js 保持一致)
 SHORT_WINDOWS = (3, 14)
@@ -98,14 +104,7 @@ def load_json(path, default=None):
 
 
 def save_json(path, obj):
-    # 若有 SECRET 则加密包装（仅公库暴露内容），否则明文
-    if os.environ.get("PRICE_DATA_SECRET"):
-        try:
-            import crypto_price as _cp
-            _cp.save_json_encrypt(path, obj)
-            return
-        except Exception as e:
-            print(f"  WARN 加密失败回退明文 {path}: {e}", flush=True)
+    """所有当前产物均使用明文 JSON，保留稳定路径与既有 schema。"""
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
         json.dump(obj, f, ensure_ascii=False, separators=(",", ":"))
@@ -159,10 +158,23 @@ def aggregate_daily(date, force=False):
             entry["buy_avg"] = round(_mean(buy_avgs), 2)
         daily_items[slug] = entry
 
+    total_batches = len(batches)
+    captured_total = sum(int(batch.get("captured_items") or 0) for batch in batches)
+    planned_total = sum(int(batch.get("planned_items") or 0) for batch in batches)
+
     doc = {
+        "schema_version": SCHEMA_VERSION,
+        "data_revision": DATA_REVISION,
+        "model_version": MODEL_VERSION,
         "date": date,
         "tz": "Asia/Shanghai (UTC+8)",
         "generated": _utc_now_iso(),
+        "quality": {
+            "batches": total_batches,
+            "planned_items": planned_total,
+            "captured_items": captured_total,
+            "coverage": _r4(captured_total / planned_total) if planned_total else None,
+        },
         "items": daily_items,
     }
     save_json(out_path, doc)
@@ -437,6 +449,9 @@ def build_table_bundle(items_meta):
         items[slug] = entry
 
     bundle = {
+        "schema_version": SCHEMA_VERSION,
+        "data_revision": DATA_REVISION,
+        "model_version": MODEL_VERSION,
         "generated": _utc_now_iso(),
         "tz": "Asia/Shanghai (UTC+8)",
         "day": today,
@@ -444,8 +459,45 @@ def build_table_bundle(items_meta):
         "items": items,
     }
     save_json(TABLE_OUT, bundle)
+    write_table_kv_chunks(bundle)
     print(f"  [bundle] → {TABLE_OUT} ({len(items)} 物品)")
     return bundle
+
+
+def write_table_kv_chunks(bundle):
+    """将大表拆成稳定小分片，避免 Action 经 Edge Function 写 KV 时超过请求体限制。"""
+    os.makedirs(TABLE_KV_DIR, exist_ok=True)
+    for name in os.listdir(TABLE_KV_DIR):
+        if name.endswith(".json"):
+            os.remove(os.path.join(TABLE_KV_DIR, name))
+    slugs = sorted((bundle.get("items") or {}).keys())
+    chunks = []
+    for index, start in enumerate(range(0, len(slugs), TABLE_KV_CHUNK_SIZE)):
+        key = f"price_table_chunk_{index:03d}"
+        items = {slug: bundle["items"][slug] for slug in slugs[start:start + TABLE_KV_CHUNK_SIZE]}
+        doc = {
+            "schema_version": bundle["schema_version"],
+            "data_revision": bundle["data_revision"],
+            "model_version": bundle["model_version"],
+            "generated": bundle["generated"],
+            "tz": bundle["tz"],
+            "day": bundle["day"],
+            "last_daily": bundle["last_daily"],
+            "items": items,
+        }
+        path = os.path.join(TABLE_KV_DIR, f"{index:03d}.json")
+        save_json(path, doc)
+        chunks.append({"key": key, "file": f"kv/{index:03d}.json", "count": len(items)})
+    save_json(TABLE_KV_INDEX, {
+        "schema_version": bundle["schema_version"],
+        "data_revision": bundle["data_revision"],
+        "model_version": bundle["model_version"],
+        "generated": bundle["generated"],
+        "tz": bundle["tz"],
+        "day": bundle["day"],
+        "last_daily": bundle["last_daily"],
+        "chunks": chunks,
+    })
 
 
 # ── 5. 元数据 ──────────────────────────────────────────────────────────
@@ -461,6 +513,9 @@ def build_meta(bundle, daily_files, items_meta):
         if bts:
             last_snapshot = bts[-1].get("time")
     meta = {
+        "schema_version": SCHEMA_VERSION,
+        "data_revision": DATA_REVISION,
+        "model_version": MODEL_VERSION,
         "generated": _utc_now_iso(),
         "tz": "Asia/Shanghai (UTC+8)",
         "today": today,
@@ -517,9 +572,9 @@ def main():
         # 昨日 = 今日 UTC+8 减 1 天(时间戳可能跨 0 点,按 UTC+8 归属日聚合)
         yesterday = (datetime.now(TZ_CN) - timedelta(days=1)).strftime("%Y-%m-%d")
         print(f"== 日均价聚合(目标日 {yesterday},今日 {today}) ==", flush=True)
-        _, already = aggregate_daily(yesterday, force=args.force)
-        if not already:
-            append_series(yesterday, items_meta)
+        aggregate_daily(yesterday, force=args.force)
+        # 即使 daily 已在上次中断后存在，也要补齐可能漏写的 series。
+        append_series(yesterday, items_meta)
         cleanup()
         if os.path.isdir(DAILY_DIR):
             daily_files = sorted(f for f in os.listdir(DAILY_DIR) if f.endswith(".json"))
