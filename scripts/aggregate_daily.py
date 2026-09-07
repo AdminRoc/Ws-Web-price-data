@@ -97,7 +97,7 @@ def load_json(path, default=None):
         except Exception:
             pass
     try:
-        with open(path, "r", encoding="utf-8") as f:
+        with open(path, "r", encoding="utf-8-sig") as f:
             return json.load(f)
     except Exception:
         return default
@@ -549,6 +549,23 @@ def cleanup():
             if f.endswith(".json") and f[:-5] < cutoff:
                 os.remove(os.path.join(DAILY_DIR, f))
                 removed += 1
+    if os.path.isdir(SERIES_DIR):
+        cutoff = _cn_date_days_ago(SERIES_RETENTION_DAYS)
+        for f in os.listdir(SERIES_DIR):
+            if not f.endswith(".json"):
+                continue
+            path = os.path.join(SERIES_DIR, f)
+            series = load_json(path)
+            if not series:
+                continue
+            days = [day for day in (series.get("days") or []) if day.get("d", "") >= cutoff]
+            if not days:
+                os.remove(path)
+                removed += 1
+                continue
+            if len(days) != len(series.get("days") or []):
+                series["days"] = days
+                save_json(path, series)
     if removed:
         print(f"  [清理] 移除 {removed} 个过期文件")
 
