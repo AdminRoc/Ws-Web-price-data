@@ -41,6 +41,15 @@ jobs:
               -X POST 'https://price.wfspeed.run/api/update-kv' \
               -H "Authorization: Bearer ${KV_WRITE_TOKEN}" \
               -H 'Content-Type: application/json' --data-binary "@$payload"
+            python3 - "$key" "$file" <<'PY'
+          import hashlib, sys, urllib.request
+          key, source = sys.argv[1:]
+          expected = open(source, 'rb').read()
+          with urllib.request.urlopen('https://price.wfspeed.run/api/kv?key=' + key, timeout=60) as response:
+              actual = response.read()
+          if hashlib.sha256(actual).digest() != hashlib.sha256(expected).digest():
+              raise SystemExit('readback hash mismatch for ' + key)
+          PY
             rm -f "$payload"
           }
           CN_DATE=$(python3 -c 'import json; print(json.load(open("data/meta/latest.json",encoding="utf-8"))["today"])')
