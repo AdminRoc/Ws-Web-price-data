@@ -395,6 +395,13 @@ async def main():
         items_data = await fetch_items(session)
 
     items = [it for it in (items_data.get("data") or []) if it.get("slug")]
+    if MAX_ITEMS <= 0:
+        current_slugs = {it["slug"] for it in items}
+        previous_items = (load_json(ITEMS_OUT) or {}).get("items") or {}
+        missing = {slug for slug, item in previous_items.items()
+                   if not item.get("wm_deleted") and slug not in current_slugs}
+        if len(items) < 1500 or len(current_slugs) != len(items) or missing:
+            raise RuntimeError(f"WM item manifest incomplete: {len(items)} items, {len(missing)} published slugs missing")
     if MAX_ITEMS > 0:
         items = items[:MAX_ITEMS]
     slugs = [it["slug"] for it in items]
