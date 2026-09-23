@@ -61,6 +61,19 @@ jobs:
           KV_WRITE_TOKEN: ${{ secrets.KV_WRITE_TOKEN }}
         run: |
           set -euo pipefail
+          test -n "${KV_WRITE_TOKEN}" || { echo 'Missing KV_WRITE_TOKEN'; exit 1; }
+          python3 - <<'PY'
+          import glob, json, pathlib
+          meta = json.loads(pathlib.Path('data/meta/latest.json').read_text(encoding='utf-8'))
+          paths = ['data/meta/items.json', 'data/meta/model-config.json',
+                   f'data/snapshots/{meta["today"]}.json', 'data/table/kv-index.json']
+          chunks = glob.glob('data/table/kv/*.json')
+          if not chunks:
+              raise SystemExit('Missing price table KV chunks')
+          for path in paths + chunks:
+              json.loads(pathlib.Path(path).read_text(encoding='utf-8'))
+          print('KV publish inputs verified')
+          PY
           publish() {
             local key="$1"
             local file="$2"
@@ -72,10 +85,20 @@ jobs:
           json.loads(value)
           pathlib.Path(target).write_text(json.dumps({'key': key, 'value': value}, ensure_ascii=False), encoding='utf-8')
           PY
-            curl --fail-with-body --retry 3 --retry-all-errors --max-time 300 \
+            curl --silent --show-error --fail-with-body --retry 8 --retry-all-errors \
+              --retry-delay 20 --retry-max-time 300 --connect-timeout 20 --max-time 60 \
               -X POST 'https://price.wfspeed.run/api/update-kv' \
               -H "Authorization: Bearer ${KV_WRITE_TOKEN}" \
               -H 'Content-Type: application/json' --data-binary "@$payload"
+            python3 - "$key" "$file" <<'PY'
+          import hashlib, sys, urllib.request
+          key, source = sys.argv[1:]
+          expected = open(source, 'rb').read()
+          with urllib.request.urlopen('https://price.wfspeed.run/api/kv?key=' + key, timeout=60) as response:
+              actual = response.read()
+          if hashlib.sha256(actual).digest() != hashlib.sha256(expected).digest():
+              raise SystemExit('readback hash mismatch for ' + key)
+          PY
           }
           CN_DATE=$(python3 -c 'import json; print(json.load(open("data/meta/latest.json",encoding="utf-8"))["today"])')
           publish price_items data/meta/items.json
