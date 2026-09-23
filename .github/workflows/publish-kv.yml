@@ -17,6 +17,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: main
       - name: Validate and publish current plaintext data
         env:
           KV_WRITE_TOKEN: ${{ secrets.KV_WRITE_TOKEN }}
