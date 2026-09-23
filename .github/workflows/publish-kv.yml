@@ -37,7 +37,8 @@ jobs:
               raise SystemExit(source + ' is still encrypted')
           pathlib.Path(target).write_text(json.dumps({'key': key, 'value': value}, ensure_ascii=False), encoding='utf-8')
           PY
-            curl --fail-with-body --retry 3 --retry-all-errors --max-time 300 \
+            curl --silent --show-error --fail-with-body --retry 8 --retry-all-errors \
+              --retry-delay 20 --retry-max-time 300 --max-time 60 \
               -X POST 'https://price.wfspeed.run/api/update-kv' \
               -H "Authorization: Bearer ${KV_WRITE_TOKEN}" \
               -H 'Content-Type: application/json' --data-binary "@$payload"
