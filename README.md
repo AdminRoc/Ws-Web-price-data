@@ -22,7 +22,7 @@ data/
 
 ## 均价口径(与 Public-WM 一致)
 
-- 样本 = `in-game + online` 卖单合并(`/v2/orders/item/{slug}`),offline 永不参与;
+- 先从 `/v2/items` 取得稳定 `id`，再用 `/v2/orders/itemId/{id}` 抓订单；数据表仍以当前 slug 作为输出键。样本 = `in-game + online` 卖单合并,offline 永不参与;
 - `count>=3`:去掉最低价,取第 2 与第 3 位价格均值;`count 1~2`:全部取平均;`count=0`:`avg:null`;
 - 时区:时间戳存 UTC ISO;日期键按 **UTC+8**(Asia/Shanghai,恒 +8h 无夏令时)换算。
 

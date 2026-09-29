@@ -36,6 +36,9 @@ jobs:
       - name: 安装依赖
         run: pip install aiohttp -q
 
+      - name: 测试 item ID 连续性与历史迁移冲突保护
+        run: python3 -m unittest discover -s tests -p 'test_item_identity.py' -v
+
       - name: 抓取全量快照
         run: python3 scripts/fetch_snapshots.py
         env:
@@ -47,6 +50,18 @@ jobs:
         env:
           # Legacy read-only compatibility until the one-time plaintext migration finishes.
           PRICE_DATA_SECRET: ${{ secrets.PRICE_DATA_SECRET }}
+
+      - name: 检查 price_items 的 1 MiB KV 单值上限
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('data/meta/items.json')
+          size = path.stat().st_size
+          limit = 1048576
+          if size > limit:
+              raise SystemExit(f'{path} exceeds the PRICE_KV single-value limit: {size} > {limit} bytes')
+          print(f'PRICE_KV price_items size verified: {size}/{limit} bytes')
+          PY
 
       - name: 校验明文数据与核心结构
         run: |

@@ -2,7 +2,8 @@
 """Ws-Web-price-data · 快照抓取(Phase 1) —— 全量均价快照,每次运行一个批次。
 
 口径(与 Public-WM fetch_avg_prices.py 一致):
-  - 样本 = in-game + online 的卖单合并(/v2/orders/item/{slug});offline 永不参与
+  - 以 /v2/items 中稳定 id 请求 /v2/orders/itemId/{id};快照仍以当前 slug 作为数据键
+  - 样本 = in-game + online 的卖单合并;offline 永不参与
   - count>=3:去掉最低价(第 1 位),取第 2 与第 3 位价格均值 = avg
   - count 1~2:全部价格取平均
   - count=0:avg=null(不参与当日平均,聚合侧跳过)
@@ -43,6 +44,15 @@ import sys
 import time
 from collections import deque
 from datetime import datetime, timezone, timedelta
+from urllib.parse import quote
+
+from item_identity import (
+    apply_history_rekeys,
+    build_slug_renames,
+    remap_previous_metadata,
+    validate_current_items,
+    write_identity_sidecar,
+)
 
 import aiohttp
 
@@ -75,6 +85,7 @@ DATA_REVISION = os.environ.get("DATA_REVISION", "working-tree")
 MODEL_VERSION = "price-model-v1"
 SNAPSHOTS_DIR = os.path.join(DATA_DIR, "snapshots")
 ITEMS_OUT = os.path.join(DATA_DIR, "meta", "items.json")
+IDENTITIES_OUT = os.path.join(DATA_DIR, "meta", "wm-identities.json")
 MAX_ITEMS = int(os.environ.get("MAX_ITEMS", "0") or 0)
 
 TZ_CN = timezone(timedelta(hours=8))  # Asia/Shanghai = UTC+8,无夏令时
@@ -118,7 +129,9 @@ class RateLimiter:
     def __init__(self, max_rps):
         self.interval = 1.0 / max_rps
         self._lock = asyncio.Lock()
-        self._next = 0.0
+        # Leave a full interval after the preceding /v2/items request before the
+        # first per-item order request, keeping the whole integration under 3/s.
+        self._next = time.monotonic() + self.interval
 
     async def wait(self):
         async with self._lock:
@@ -254,10 +267,12 @@ async def fetch_items(session):
     raise last
 
 
-async def fetch_slug(session, sem, limiter, slug, max_rank, throttle, deadline):
+async def fetch_item(session, sem, limiter, item, max_rank, throttle, deadline):
     """单物品抓取:返回 (slug, 结果) / (slug, "ERROR") / (slug, "SKIPPED")。
     每次请求发起前经 RateLimiter 限速(≤3 req/s);尝试前检查总截止时间(deadline)。"""
-    url = f"{DIRECT_URL}/v2/orders/item/{slug}"
+    slug = item['slug']
+    item_id = quote(str(item['id']), safe='')
+    url = f"{DIRECT_URL}/v2/orders/itemId/{item_id}"
     async with sem:
         for attempt in range(MAX_RETRIES):
             if time.time() > deadline:
@@ -301,13 +316,13 @@ async def fetch_slug(session, sem, limiter, slug, max_rank, throttle, deadline):
 async def run_pass(session, sem, limiter, tasks, max_ranks, results, failed, round_no, throttle, t0):
     """执行一轮抓取;round_no=0 全量,round_no>=1 只处理 failed。
     总时间预算到期时中断剩余任务,返回已完成的(部分批次)。"""
-    pending = tasks if round_no == 0 else list(failed)
+    pending = tasks if round_no == 0 else [item for item in tasks if item['slug'] in failed]
     if not pending:
         return False
     deadline = t0 + RUN_TIME_BUDGET
     tasks_ = [asyncio.ensure_future(
-        fetch_slug(session, sem, limiter, slug, max_ranks.get(slug, 0), throttle, deadline))
-        for slug in pending]
+        fetch_item(session, sem, limiter, item, max_ranks.get(item['slug'], 0), throttle, deadline))
+        for item in pending]
     done_count = 0
     failed.clear()
     timed_out = False
@@ -394,14 +409,23 @@ async def main():
             limit=CONCURRENCY, limit_per_host=CONCURRENCY, ttl_dns_cache=300)) as session:
         items_data = await fetch_items(session)
 
-    items = [it for it in (items_data.get("data") or []) if it.get("slug")]
+    items = (items_data or {}).get("data") or []
+    if not isinstance(items, list):
+        raise RuntimeError('WM item response data is not a list')
+    validate_current_items(items, minimum=1 if MAX_ITEMS > 0 else 1500)
+    previous_items = {}
+    renames = {}
     if MAX_ITEMS <= 0:
-        current_slugs = {it["slug"] for it in items}
-        previous_items = (load_json(ITEMS_OUT) or {}).get("items") or {}
-        missing = {slug for slug, item in previous_items.items()
-                   if not item.get("wm_deleted") and slug not in current_slugs}
-        if len(items) < 1500 or len(current_slugs) != len(items) or missing:
-            raise RuntimeError(f"WM item manifest incomplete: {len(items)} items, {len(missing)} published slugs missing")
+        previous_manifest = load_json(ITEMS_OUT)
+        if os.path.exists(ITEMS_OUT) and not isinstance(previous_manifest, dict):
+            raise RuntimeError('Previous price item manifest is unreadable; refusing to replace it')
+        previous_items = (previous_manifest or {}).get("items") or {}
+        previous_identity = load_json(IDENTITIES_OUT)
+        if os.path.exists(IDENTITIES_OUT) and not isinstance(previous_identity, dict):
+            raise RuntimeError('Previous WM identity sidecar is unreadable; refusing to re-key history')
+        previous_ids = (previous_identity or {}).get('items') or {}
+        renames = build_slug_renames(previous_items, previous_ids, items)
+        print(f"身份连续性验证通过：{len(items)} 个物品，{len(renames)} 个 slug 变更", flush=True)
     if MAX_ITEMS > 0:
         items = items[:MAX_ITEMS]
     slugs = [it["slug"] for it in items]
@@ -420,12 +444,12 @@ async def main():
 
     async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(
             limit=CONCURRENCY, limit_per_host=CONCURRENCY, ttl_dns_cache=300)) as session:
-        timed_out = await run_pass(session, sem, limiter, slugs, max_ranks, results, failed, 0, throttle, t0)
+        timed_out = await run_pass(session, sem, limiter, items, max_ranks, results, failed, 0, throttle, t0)
         if not timed_out:
             for rnd in range(1, RETRY_ROUNDS + 1):
                 if not failed:
                     break
-                timed_out = await run_pass(session, sem, limiter, slugs, max_ranks, results, failed, rnd, throttle, t0)
+                timed_out = await run_pass(session, sem, limiter, items, max_ranks, results, failed, rnd, throttle, t0)
                 if timed_out:
                     break
 
@@ -437,6 +461,10 @@ async def main():
     elapsed = time.time() - t0
     print(f"抓取完成!有均价:{has_avg}  共:{len(results)}/{len(slugs)}  耗时:{elapsed / 60:.1f} 分钟", flush=True)
 
+    if MAX_ITEMS <= 0 and renames:
+        counts = apply_history_rekeys(DATA_DIR, renames, {item['slug']: item for item in items})
+        print('历史 slug 安全迁移完成：' + ', '.join(f'{kind}={count}' for kind, count in counts.items()), flush=True)
+
     date = _cn_date()
     generated = _utc_now_iso()
     batch_items = {}
@@ -447,14 +475,16 @@ async def main():
     error_items = sum(1 for value in results.values() if value.get("error"))
     append_snapshot(date, batch_items, generated, len(items), error_items)
 
-    previous_items = (load_json(ITEMS_OUT) or {}).get("items") or {}
-    items_meta = {it["slug"]: _item_meta(it, previous_items.get(it["slug"])) for it in items}
+    previous_by_current_slug = remap_previous_metadata(previous_items, renames)
+    items_meta = {it["slug"]: _item_meta(it, previous_by_current_slug.get(it["slug"])) for it in items}
     for slug, previous in previous_items.items():
-        if slug not in items_meta:
+        if slug not in items_meta and slug not in renames:
             retained = dict(previous)
             retained["wm_deleted"] = True
             items_meta[slug] = retained
     write_items_manifest(items_meta)
+    if MAX_ITEMS <= 0:
+        write_identity_sidecar(IDENTITIES_OUT, items)
 
 
 if __name__ == "__main__":
