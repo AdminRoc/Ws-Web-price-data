@@ -102,15 +102,12 @@ jobs:
               echo "changed=true" >> "$GITHUB_OUTPUT"
               exit 0
             fi
-            rm -rf /tmp/data_bak && mkdir -p /tmp/data_bak
-            cp -r data/* /tmp/data_bak/ 2>/dev/null || true
-            git rebase --abort 2>/dev/null || true
-            git fetch origin main
-            git reset --hard origin/main
-            rm -rf data && mkdir -p data
-            cp -r /tmp/data_bak/* data/ 2>/dev/null || true
-            git add data/
-            git commit -m "data: 均价快照批次 + 日均价聚合 [skip ci]"
+            echo "Push rejected on attempt $i; fetching main and rebasing the single generated-data commit."
+            if ! git pull --rebase origin main; then
+              git rebase --abort 2>/dev/null || true
+              echo "::error::Could not safely rebase generated data onto main; no overwrite or publication was attempted."
+              exit 1
+            fi
             sleep "$(( (RANDOM % 4) + 2 ))"
           done
           exit 1
