@@ -1,6 +1,8 @@
 name: 抓取快照并聚合日均价
 
-# 每 2 小时(UTC 第 15 分)运行一次:
+# 正常情况下每 2 小时(UTC 第 15 分)运行一次；同一时刻 :45 另有一次
+# stale-only 兜底。schedule 运行只在最近一次完整抓取+PRICE_KV读回成功已超过 90 分钟时执行，
+# 避免延迟的 cron 或补偿槽重复追加样本；workflow_dispatch 始终可人工运行。
 #   1) 抓取全量均价快照 → 追加进当日批次文件 data/snapshots/YYYY-MM-DD.json
 #   2) 聚合前一日(UTC+8)日均价 → data/daily/ + data/series/(幂等,每天只会真正聚合一次)
 #   3) 重建表格 bundle(data/table/latest.json,含今日临时均价与预测)+ meta
@@ -12,13 +14,42 @@ on:
   workflow_dispatch:
   schedule:
     - cron: "15 */2 * * *" # 每 2 小时第 15 分(UTC);脚本内另有 0~3min 随机延迟错峰
+    - cron: "45 */2 * * *" # stale-only 兜底，延迟或漏投时补偿；由下方成功发布年龄门控
 
 concurrency:
   group: price-data
   cancel-in-progress: false
 
 jobs:
+  schedule_guard:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      run_capture: ${{ steps.guard.outputs.run_capture }}
+    steps:
+      - name: Checkout schedule guard
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
+          ref: main
+          sparse-checkout: |
+            scripts
+
+      - name: Gate scheduled capture on last fully published run
+        id: guard
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_API_URL: ${{ github.api_url }}
+          MIN_AGE_MINUTES: "90"
+        run: python3 scripts/snapshot_schedule_guard.py
+
   fetch:
+    needs: schedule_guard
+    if: needs.schedule_guard.outputs.run_capture == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
