@@ -14,7 +14,7 @@ on:
   workflow_dispatch:
   schedule:
     - cron: "15 */2 * * *" # 每 2 小时第 15 分(UTC);脚本内另有 0~3min 随机延迟错峰
-    - cron: "45 */2 * * *" # stale-only 兜底，延迟或漏投时补偿；由下方成功发布年龄门控
+    - cron: "45 * * * *" # 每小时 stale-only 兜底；下方完整成功发布年龄门控避免重复采样
 
 concurrency:
   group: price-data

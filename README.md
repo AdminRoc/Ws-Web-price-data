@@ -6,7 +6,7 @@
 
 | 工作流 | 触发 | 产物 |
 |---|---|---|
-| `fetch-snapshots.yml` | 每 2h(UTC 第 15 分)主计划、同周期第 45 分 stale-only 兜底 + 手动 | 快照批次 + **日均价聚合(幂等)** + 表格 bundle + meta,一次提交完成 |
+| `fetch-snapshots.yml` | 每 2h(UTC 第 15 分)主计划、每小时第 45 分 stale-only 兜底 + 手动 | 快照批次 + **日均价聚合(幂等)** + 表格 bundle + meta,一次提交完成 |
 | — | 聚合语义 | 目标日 = 前一日(UTC+8);`data/daily/`(日均价,滚动 1000 天)、`data/series/`、`data/table/`、`data/meta/` |
 
 快照工作流遇到远端推进时，只对本次生成的数据提交执行 fetch + rebase；如果同一数据文件存在无法自动合并的冲突，就停止并且不运行 jsDelivr/PRICE_KV 发布步骤。不得通过重置远端分支并整体覆盖 `data/` 来“恢复”快照。Warframe.market 请求与限速逻辑不属于此冲突处理。
