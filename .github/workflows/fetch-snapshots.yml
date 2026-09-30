@@ -234,8 +234,15 @@ jobs:
           done
           publish price_items_manifest "$ITEM_ARTIFACT_DIR/price_items_manifest.json"
           publish price_model_config data/meta/model-config.json
-          for part in "$ARTIFACT_DIR"/price_snapshot_*.json; do
+          # Match only content-addressed data shards. The similarly prefixed
+          # price_snapshot_prepare.json is an API control request, not a KV shard.
+          for part in "$ARTIFACT_DIR"/price_snapshot_????????_???_???_????????????????.json; do
+            test -f "$part" || { echo 'No canonical snapshot shard artifacts found'; exit 1; }
             key="$(basename "$part" .json)"
+            [[ "$key" =~ ^price_snapshot_[0-9]{8}_[0-9]{3}_[0-9]{3}_[a-f0-9]{16}$ ]] || {
+              echo 'Unexpected snapshot shard artifact name; refusing KV publication' >&2
+              exit 1
+            }
             publish "$key" "$part"
           done
           # The manifest switches consumers to the full set of verified,

@@ -1,4 +1,5 @@
 import json
+import re
 import sys
 import tempfile
 import unittest
@@ -45,6 +46,17 @@ class SnapshotKvShardsTests(unittest.TestCase):
                 restored.update(payload["items"])
             self.assertEqual(restored, items)
             self.assertEqual(manifest["snapshot_generation"], __import__("hashlib").sha256(snapshot_path.read_bytes()).hexdigest())
+
+            shard_files = sorted((root / "out").glob("price_snapshot_????????_???_???_????????????????.json"))
+            self.assertEqual(
+                {path.stem for path in shard_files},
+                {part["key"] for part in refs},
+                "the strict publish glob must select only content-addressed data shards",
+            )
+            self.assertTrue((root / "out" / "price_snapshot_prepare.json").is_file())
+            workflow = (Path(__file__).resolve().parents[1] / ".github/workflows/fetch-snapshots.yml").read_text(encoding="utf-8")
+            self.assertIn('for part in "$ARTIFACT_DIR"/price_snapshot_????????_???_???_????????????????.json; do', workflow)
+            self.assertNotIn('for part in "$ARTIFACT_DIR"/price_snapshot_*.json; do', workflow)
 
     def test_existing_batch_keys_are_stable_when_new_batch_is_appended(self):
         first = {"time": "2026-09-30T10:00:00Z", "items": {"a": {"avg": 1}}}
