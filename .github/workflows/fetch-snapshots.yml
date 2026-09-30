@@ -153,6 +153,7 @@ jobs:
           for f in \
             "data/meta/items.json" \
             "data/meta/latest.json" \
+            "data/table/kv-index.json" \
             "data/table/latest.json" \
             "data/snapshots/${CN_DATE}.json" \
             "data/daily/${CN_YDAY}.json" ; do
