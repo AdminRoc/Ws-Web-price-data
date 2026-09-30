@@ -21,6 +21,7 @@
   - data/meta/latest.json        站点状态元数据(今日/最近日均价/天数/物品数/快照信息)
 """
 import argparse
+import hashlib
 import json
 import math
 import os
@@ -367,6 +368,7 @@ def build_table_bundle(items_meta):
     # 今日快照 → 临时当日均价(含等级)
     today = _cn_date()
     snap_today = load_json(os.path.join(SNAPSHOTS_DIR, f"{today}.json"))
+    snapshot_generation = None
     today_series = {}
     today_zero = {}
     today_max = {}
@@ -508,6 +510,8 @@ def build_meta(bundle, daily_files, items_meta):
     last_snapshot = None
     batches_today = 0
     if snap_today:
+        with open(os.path.join(SNAPSHOTS_DIR, f"{today}.json"), "rb") as snapshot_file:
+            snapshot_generation = hashlib.sha256(snapshot_file.read()).hexdigest()
         batches_today = len(snap_today.get("batches") or [])
         bts = snap_today.get("batches") or []
         if bts:
@@ -521,6 +525,7 @@ def build_meta(bundle, daily_files, items_meta):
         "today": today,
         "last_snapshot": last_snapshot,
         "snapshot_batches_today": batches_today,
+        "snapshot_generation": snapshot_generation,
         "last_daily": daily_dates[-1] if daily_dates else None,
         "daily_count": len(daily_dates),
         "oldest_daily": daily_dates[0] if daily_dates else None,

@@ -70,6 +70,9 @@ jobs:
       - name: 测试 item ID 连续性与历史迁移冲突保护
         run: python3 -m unittest discover -s tests -p 'test_item_identity.py' -v
 
+      - name: 测试 PRICE_KV 快照分片与完整性校验
+        run: python3 -m unittest discover -s tests -p 'test_snapshot_kv_shards.py' -v
+
       - name: 抓取全量快照
         run: python3 scripts/fetch_snapshots.py
         env:
@@ -111,6 +114,12 @@ jobs:
               print('VERIFY FAIL:' + '\n'.join(bad)); sys.exit(1)
           print(f'VERIFY OK: {len(files)} json files')
           "
+
+      - name: 生成并校验当日快照 KV 分片
+        run: >-
+          python3 scripts/snapshot_kv_shards.py
+          "data/snapshots/$(python3 -c 'import json; print(json.load(open("data/meta/latest.json",encoding="utf-8"))["today"])').json"
+          data/meta/latest.json "$RUNNER_TEMP/price-snapshot-kv"
 
       - name: 生成本次运行摘要
         run: >-
@@ -166,6 +175,9 @@ jobs:
         run: |
           set -euo pipefail
           test -n "${KV_WRITE_TOKEN}" || { echo 'Missing KV_WRITE_TOKEN'; exit 1; }
+          CN_DATE=$(python3 -c 'import json; print(json.load(open("data/meta/latest.json",encoding="utf-8"))["today"])')
+          ARTIFACT_DIR="$RUNNER_TEMP/price-snapshot-kv"
+          python3 scripts/snapshot_kv_shards.py "data/snapshots/${CN_DATE}.json" data/meta/latest.json "$ARTIFACT_DIR"
           publish() {
             local key="$1"
             local file="$2"
@@ -187,17 +199,30 @@ jobs:
           import hashlib, sys, urllib.request
           key, source = sys.argv[1:]
           expected = open(source, 'rb').read()
-          with urllib.request.urlopen('https://price.wfspeed.run/api/kv?key=' + key, timeout=60) as response:
+          verify = hashlib.sha256(expected).hexdigest()
+          with urllib.request.urlopen('https://price.wfspeed.run/api/kv?key=' + key + '&verify=' + verify, timeout=60) as response:
               actual = response.read()
           if hashlib.sha256(actual).digest() != hashlib.sha256(expected).digest():
               raise SystemExit('readback hash mismatch for ' + key)
           PY
             rm -f "$payload"
           }
-          CN_DATE=$(python3 -c 'import json; print(json.load(open("data/meta/latest.json",encoding="utf-8"))["today"])')
+          # Prune only expired keys under the dedicated shard prefix, then
+          # enforce a bounded 128 MiB snapshot-storage budget before writes.
+          curl --silent --show-error --fail-with-body --retry 3 \
+            --retry-delay 5 --max-time 60 \
+            -X POST 'https://price.wfspeed.run/api/update-kv' \
+            -H "Authorization: Bearer ${KV_WRITE_TOKEN}" \
+            -H 'Content-Type: application/json' --data-binary "@$ARTIFACT_DIR/price_snapshot_prepare.json"
           publish price_items data/meta/items.json
           publish price_model_config data/meta/model-config.json
-          publish price_today_snapshots "data/snapshots/${CN_DATE}.json"
+          for part in "$ARTIFACT_DIR"/price_snapshot_*.json; do
+            key="$(basename "$part" .json)"
+            publish "$key" "$part"
+          done
+          # The manifest switches consumers to the full set of verified,
+          # individually bounded batch shards; publish it only after every shard.
+          publish price_today_snapshots_manifest "$ARTIFACT_DIR/price_today_snapshots_manifest.json"
           publish price_table_index data/table/kv-index.json
           for part in data/table/kv/*.json; do
             key="price_table_chunk_$(basename "$part" .json)"

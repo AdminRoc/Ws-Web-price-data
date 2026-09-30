@@ -13,6 +13,8 @@
 
 定时运行在读取上一次 workflow 的完整成功状态(包括 `PRICE_KV` 读回)后才按 90 分钟新鲜度门槛决定是否抓取；近时重复的主计划/兜底计划会跳过，手动 `workflow_dispatch` 不受门槛限制。GitHub API 状态不可核实时，定时门控失败关闭，不发起 Warframe.market 请求，也不写数据。
 
+`PRICE_KV` 当日快照采用有界分片发布：每个批次按物品键拆成不超过 768 KiB 的内容寻址分片，工作流逐片写入并校验哈希/字节数，再发布 `price_today_snapshots_manifest`；`price_meta` 始终最后写入作为就绪标记。公开源 `data/snapshots/YYYY-MM-DD.json` 保持完整、不拆改历史。消费端只接受 generation、revision、日期、批次数、末次时间和所有分片完整性均与就绪元数据匹配的数据集。KV 侧与源快照相同保留 7 天：每次写入前只清理该专用前缀下早于安全 cutoff 的分片，并核算留存值及本次增量；当快照分片预算达到 128 MiB 时在任何新数据键写入前失败关闭，不继续扩大存储。
+
 ## 目录结构
 
 ```
