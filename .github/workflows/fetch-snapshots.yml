@@ -207,6 +207,31 @@ jobs:
           PY
             rm -f "$payload"
           }
+          publish_raw_json() {
+            local key="$1"
+            local file="$2"
+            test -f "$file" || { echo "Missing $file"; return 1; }
+            python3 - "$file" <<'PY'
+          import json, pathlib, sys
+          json.loads(pathlib.Path(sys.argv[1]).read_text(encoding='utf-8'))
+          PY
+            curl --silent --show-error --fail-with-body --retry 8 --retry-all-errors \
+              --retry-delay 20 --retry-max-time 300 --max-time 60 \
+              -X POST 'https://price.wfspeed.run/api/update-kv' \
+              -H "Authorization: Bearer ${KV_WRITE_TOKEN}" \
+              -H "X-WFSpeed-KV-Key: ${key}" \
+              -H 'Content-Type: application/json' --data-binary "@$file"
+            python3 - "$key" "$file" <<'PY'
+          import hashlib, sys, urllib.request
+          key, source = sys.argv[1:]
+          expected = open(source, 'rb').read()
+          verify = hashlib.sha256(expected).hexdigest()
+          with urllib.request.urlopen('https://price.wfspeed.run/api/kv?key=' + key + '&verify=' + verify, timeout=60) as response:
+              actual = response.read()
+          if hashlib.sha256(actual).digest() != hashlib.sha256(expected).digest():
+              raise SystemExit('readback hash mismatch for ' + key)
+          PY
+          }
           # Prune only expired keys under the dedicated shard prefix, then
           # enforce a bounded 128 MiB snapshot-storage budget before writes.
           curl --silent --show-error --fail-with-body --retry 3 \
@@ -214,7 +239,9 @@ jobs:
             -X POST 'https://price.wfspeed.run/api/update-kv' \
             -H "Authorization: Bearer ${KV_WRITE_TOKEN}" \
             -H 'Content-Type: application/json' --data-binary "@$ARTIFACT_DIR/price_snapshot_prepare.json"
-          publish price_items data/meta/items.json
+          # Send this near-1 MiB JSON value as the raw body; wrapping it in JSON
+          # would escape quotes and exceed the Edge Functions request-body limit.
+          publish_raw_json price_items data/meta/items.json
           publish price_model_config data/meta/model-config.json
           for part in "$ARTIFACT_DIR"/price_snapshot_*.json; do
             key="$(basename "$part" .json)"
