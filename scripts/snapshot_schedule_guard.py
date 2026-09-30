@@ -16,6 +16,10 @@ REQUIRED_STEPS = {
     "提交并推送",
     "写入 wfspeed-price EdgeOne KV",
 }
+PUBLISH_EXISTING_STEPS = {
+    "仅发布已提交数据",
+    "写入 wfspeed-price EdgeOne KV",
+}
 
 
 def parse_utc(value: str) -> datetime:
@@ -83,7 +87,8 @@ def select_latest_fully_published_run(runs: list[dict], jobs_for_run) -> dict | 
             for step in producer.get("steps", [])
             if step.get("conclusion") == "success"
         }
-        if REQUIRED_STEPS.issubset(successful_steps):
+        if (REQUIRED_STEPS.issubset(successful_steps)
+                or PUBLISH_EXISTING_STEPS.issubset(successful_steps)):
             return run
         return None
     return None

@@ -15,6 +15,8 @@
 
 `PRICE_KV` 当日快照采用有界分片发布：每个批次按物品键拆成不超过 768 KiB 的内容寻址分片，工作流逐片写入并校验哈希/字节数，再发布 `price_today_snapshots_manifest`；`price_meta` 始终最后写入作为就绪标记。公开源 `data/snapshots/YYYY-MM-DD.json` 保持完整、不拆改历史。消费端只接受 generation、revision、日期、批次数、末次时间和所有分片完整性均与就绪元数据匹配的数据集。KV 侧与源快照相同保留 7 天：每次写入前只清理该专用前缀下早于安全 cutoff 的分片，并核算留存值及本次增量；当快照分片预算达到 128 MiB 时在任何新数据键写入前失败关闭，不继续扩大存储。
 
+`price_items` 目录源文件保持原有完整 JSON 和数据语义；KV 发布使用固定 `price_items_chunk_000` 至 `_007` 最多 8 个分片（每片不超过 256 KiB）及 `price_items_manifest`，没有按运行号追加的键，不会逐轮累积。站点 `/api/kv?key=price_items` 校验分片哈希、计数和 `price_meta.data_revision` 后返回原来的完整对象；旧单键只作与当前 ready revision 匹配时的兼容回退。若目录超过固定容量，分片生成阶段失败关闭，不发布不完整目录。人工事故恢复可将 `fetch-snapshots.yml` 的 `publish_existing=true` 设为只校验并发布已提交数据，跳过新的上游抓取、聚合和源仓提交。
+
 ## 目录结构
 
 ```

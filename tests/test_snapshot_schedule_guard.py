@@ -90,6 +90,23 @@ class SnapshotScheduleGuardTests(unittest.TestCase):
         )
         self.assertIsNone(result)
 
+    def test_successful_publish_existing_run_counts_as_a_publication(self):
+        run = {"id": 3, "conclusion": "success", "updated_at": "2026-09-30T09:40:00Z"}
+        jobs = {
+            3: [
+                {
+                    "name": "fetch",
+                    "conclusion": "success",
+                    "steps": [
+                        {"name": "仅发布已提交数据", "conclusion": "success"},
+                        {"name": "写入 wfspeed-price EdgeOne KV", "conclusion": "success"},
+                    ],
+                }
+            ]
+        }
+        result = select_latest_fully_published_run([run], lambda item: jobs[item["id"]])
+        self.assertEqual(result, run)
+
     @patch("snapshot_schedule_guard.api_json")
     def test_jobs_are_read_from_the_run_jobs_endpoint(self, api_json):
         run = {"id": 321, "conclusion": "success", "updated_at": "2026-09-30T08:20:00Z"}
