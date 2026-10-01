@@ -34,8 +34,10 @@ def should_run_capture(
     latest_run: dict | None,
     now: datetime,
     min_age: timedelta,
+    cf_schedule_fallback: bool | str = False,
 ) -> tuple[bool, str]:
-    if event_name != "schedule":
+    fallback_enabled = cf_schedule_fallback is True or str(cf_schedule_fallback).strip().lower() == "true"
+    if event_name != "schedule" and not fallback_enabled:
         return True, f"{event_name} run: freshness gate does not suppress manual dispatches"
     if latest_run is None:
         return True, "no completed workflow run found; allow scheduled capture"
@@ -76,7 +78,7 @@ def select_latest_fully_published_run(runs: list[dict], jobs_for_run) -> dict | 
         jobs = jobs_for_run(run)
         producer = next((job for job in jobs if job.get("name") == "fetch"), None)
         if producer and producer.get("conclusion") == "skipped":
-            guard = next((job for job in jobs if job.get("name") == "schedule-guard"), None)
+            guard = next((job for job in jobs if job.get("name") == "schedule_guard"), None)
             if run.get("conclusion") == "success" and guard and guard.get("conclusion") == "success":
                 # This was an intentional freshness skip, not a new data publication.
                 continue
@@ -106,7 +108,9 @@ def latest_fully_published_run(repository: str, api_url: str, token: str) -> dic
 
 def main() -> int:
     event_name = os.environ.get("EVENT_NAME", "")
-    if event_name != "schedule":
+    fallback_input = os.environ.get("CF_SCHEDULE_FALLBACK", "false")
+    fallback_enabled = fallback_input.strip().lower() == "true"
+    if event_name != "schedule" and not fallback_enabled:
         print(f"run_capture=true ({event_name or 'unknown'} run bypasses schedule gate)")
         return write_output(True)
 
@@ -130,7 +134,7 @@ def main() -> int:
         print("::error::MIN_AGE_MINUTES must be an integer")
         return 1
     run_capture, reason = should_run_capture(
-        event_name, latest, datetime.now(timezone.utc), min_age
+        event_name, latest, datetime.now(timezone.utc), min_age, fallback_input
     )
     print(f"run_capture={str(run_capture).lower()} ({reason})")
     if not run_capture:

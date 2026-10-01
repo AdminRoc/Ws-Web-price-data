@@ -1,8 +1,8 @@
 name: 抓取快照并聚合日均价
 
 # 正常情况下每 2 小时(UTC 第 15 分)运行一次；同一时刻 :45 另有一次
-# stale-only 兜底。schedule 运行只在最近一次完整抓取+PRICE_KV读回成功已超过 90 分钟时执行，
-# 避免延迟的 cron 或补偿槽重复追加样本；workflow_dispatch 始终可人工运行。
+# stale-only 兜底。GitHub schedule 与明确标记的 Cloudflare hourly fallback 都使用同一
+# 90 分钟完整抓取+PRICE_KV读回成功门槛；普通手动 workflow_dispatch 仍可强制运行。
 #   1) 抓取全量均价快照 → 追加进当日批次文件 data/snapshots/YYYY-MM-DD.json
 #   2) 聚合前一日(UTC+8)日均价 → data/daily/ + data/series/(幂等,每天只会真正聚合一次)
 #   3) 重建表格 bundle(data/table/latest.json,含今日临时均价与预测)+ meta
@@ -15,6 +15,11 @@ on:
     inputs:
       publish_existing:
         description: Publish and validate the already committed dataset without another upstream scrape
+        type: boolean
+        required: false
+        default: false
+      cf_schedule_fallback:
+        description: Mark as the hourly Cloudflare schedule fallback
         type: boolean
         required: false
         default: false
@@ -47,6 +52,7 @@ jobs:
         id: guard
         env:
           EVENT_NAME: ${{ github.event_name }}
+          CF_SCHEDULE_FALLBACK: ${{ github.event.inputs.cf_schedule_fallback }}
           GH_TOKEN: ${{ github.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           GITHUB_API_URL: ${{ github.api_url }}

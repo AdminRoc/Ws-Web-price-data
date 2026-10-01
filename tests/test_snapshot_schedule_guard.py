@@ -25,6 +25,11 @@ class SnapshotScheduleGuardTests(unittest.TestCase):
         run, _ = should_run_capture("workflow_dispatch", None, NOW, WINDOW)
         self.assertTrue(run)
 
+    def test_flagged_cloudflare_dispatch_uses_freshness_gate(self):
+        previous = successful_run("2026-09-30T09:30:00Z")
+        run, _ = should_run_capture("workflow_dispatch", previous, NOW, WINDOW, "true")
+        self.assertFalse(run)
+
     def test_no_completed_success_allows_capture(self):
         run, _ = should_run_capture("schedule", None, NOW, WINDOW)
         self.assertTrue(run)
@@ -55,7 +60,7 @@ class SnapshotScheduleGuardTests(unittest.TestCase):
         published = {"id": 1, "conclusion": "success", "updated_at": "2026-09-30T08:20:00Z"}
         jobs = {
             2: [
-                {"name": "schedule-guard", "conclusion": "success"},
+                {"name": "schedule_guard", "conclusion": "success"},
                 {"name": "fetch", "conclusion": "skipped", "steps": []},
             ],
             1: [
