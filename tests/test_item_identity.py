@@ -51,6 +51,21 @@ class ItemIdentityTests(unittest.TestCase):
         self.assertIs(result['new_slug'], previous['old_slug'])
         self.assertIn('old_slug', result)
 
+    def test_confirmed_retirement_skips_active_identity_continuity_without_deleting_history(self):
+        previous_meta = {
+            'retired_slug': {
+                'name': 'Retired Item',
+                'wm_deleted': True,
+            },
+        }
+        previous_ids = {'retired_slug': 'retired-id'}
+        current = [{'id': 'current-id', 'slug': 'current_slug', 'en': 'Current Item'}]
+
+        self.assertEqual(
+            build_slug_renames(previous_meta, previous_ids, current, minimum=1),
+            {},
+        )
+
     def test_history_rekey_moves_all_public_history_shapes(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
