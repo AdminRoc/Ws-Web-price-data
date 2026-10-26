@@ -14,11 +14,11 @@ WORKFLOW_FILE = "fetch-snapshots.yml"
 REQUIRED_STEPS = {
     "抓取全量快照",
     "提交并推送",
-    "写入 wfspeed-price EdgeOne KV",
+    "Verify and publish price raw release pointer",
 }
 PUBLISH_EXISTING_STEPS = {
     "仅发布已提交数据",
-    "写入 wfspeed-price EdgeOne KV",
+    "Verify and publish price raw release pointer",
 }
 
 

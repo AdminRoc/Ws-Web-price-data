@@ -72,7 +72,7 @@ class SnapshotScheduleGuardTests(unittest.TestCase):
                         for name in (
                             "抓取全量快照",
                             "提交并推送",
-                            "写入 wfspeed-price EdgeOne KV",
+                            "Verify and publish price raw release pointer",
                         )
                     ],
                 }
@@ -104,7 +104,7 @@ class SnapshotScheduleGuardTests(unittest.TestCase):
                     "conclusion": "success",
                     "steps": [
                         {"name": "仅发布已提交数据", "conclusion": "success"},
-                        {"name": "写入 wfspeed-price EdgeOne KV", "conclusion": "success"},
+                        {"name": "Verify and publish price raw release pointer", "conclusion": "success"},
                     ],
                 }
             ]
@@ -117,7 +117,7 @@ class SnapshotScheduleGuardTests(unittest.TestCase):
         run = {"id": 321, "conclusion": "success", "updated_at": "2026-09-30T08:20:00Z"}
         steps = [
             {"name": name, "conclusion": "success"}
-            for name in ("抓取全量快照", "提交并推送", "写入 wfspeed-price EdgeOne KV")
+            for name in ("抓取全量快照", "提交并推送", "Verify and publish price raw release pointer")
         ]
         api_json.side_effect = [
             {"workflow_runs": [run]},

@@ -55,8 +55,14 @@ class SnapshotKvShardsTests(unittest.TestCase):
             )
             self.assertTrue((root / "out" / "price_snapshot_prepare.json").is_file())
             workflow = (Path(__file__).resolve().parents[1] / ".github/workflows/fetch-snapshots.yml").read_text(encoding="utf-8")
-            self.assertIn('for part in "$ARTIFACT_DIR"/price_snapshot_????????_???_???_????????????????.json; do', workflow)
-            self.assertNotIn('for part in "$ARTIFACT_DIR"/price_snapshot_*.json; do', workflow)
+            self.assertNotIn("prepare_snapshot_shards", workflow)
+            self.assertNotIn("price_today_snapshots_manifest", workflow)
+            self.assertIn("Verify and publish price raw release pointer", workflow)
+
+    def test_daily_aggregate_no_longer_regenerates_or_deletes_table_kv_chunks(self):
+        aggregate = (Path(__file__).resolve().parents[1] / "scripts/aggregate_daily.py").read_text(encoding="utf-8")
+        self.assertNotIn("write_table_kv_chunks", aggregate)
+        self.assertNotIn("TABLE_KV_DIR", aggregate)
 
     def test_existing_batch_keys_are_stable_when_new_batch_is_appended(self):
         first = {"time": "2026-09-30T10:00:00Z", "items": {"a": {"avg": 1}}}

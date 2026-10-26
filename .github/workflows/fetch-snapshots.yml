@@ -7,8 +7,7 @@ name: 抓取快照并聚合日均价
 #   2) 聚合前一日(UTC+8)日均价 → data/daily/ + data/series/(幂等,每天只会真正聚合一次)
 #   3) 重建表格 bundle(data/table/latest.json,含今日临时均价与预测)+ meta
 #   4) 清理过期文件(snapshots 7 天 / daily+series 1000 天)
-#   5) 有变动提交;jsDelivr purge 立即生效
-# 站点优先读取 wfspeed-price 的 EdgeOne KV，公开数据仓用于回退和历史保留。
+#   5) 提交完整数据集并仅发布 SHA 固定 raw 文件的 EdgeOne KV 指针
 
 on:
   workflow_dispatch:
@@ -82,9 +81,6 @@ jobs:
       - name: 测试 item ID 连续性与历史迁移冲突保护
         run: python3 -m unittest discover -s tests -p 'test_item_identity.py' -v
 
-      - name: 测试 PRICE_KV 快照分片与完整性校验
-        run: python3 -m unittest discover -s tests -p 'test_snapshot_kv_shards.py' -v
-
       - name: 抓取全量快照
         if: ${{ github.event.inputs.publish_existing != 'true' }}
         run: python3 scripts/fetch_snapshots.py
@@ -99,10 +95,13 @@ jobs:
           # Legacy read-only compatibility until the one-time plaintext migration finishes.
           PRICE_DATA_SECRET: ${{ secrets.PRICE_DATA_SECRET }}
 
-      - name: 生成物品清单 KV 有界分片
-        run: >-
-          python3 scripts/item_catalog_kv_shards.py
-          data/meta/items.json "$RUNNER_TEMP/price-item-catalog-kv"
+      - name: Build release manifest and lazy history indexes
+        if: ${{ github.event.inputs.publish_existing != 'true' }}
+        run: python3 scripts/build_release_manifest.py
+
+      - name: Verify committed release manifest
+        if: ${{ github.event.inputs.publish_existing == 'true' }}
+        run: python3 scripts/build_release_manifest.py --verify
 
       - name: 校验明文数据与核心结构
         run: |
@@ -121,12 +120,6 @@ jobs:
               print('VERIFY FAIL:' + '\n'.join(bad)); sys.exit(1)
           print(f'VERIFY OK: {len(files)} json files')
           "
-
-      - name: 生成并校验当日快照 KV 分片
-        run: >-
-          python3 scripts/snapshot_kv_shards.py
-          "data/snapshots/$(python3 -c 'import json; print(json.load(open("data/meta/latest.json",encoding="utf-8"))["today"])').json"
-          data/meta/latest.json "$RUNNER_TEMP/price-snapshot-kv"
 
       - name: 生成本次运行摘要
         run: >-
@@ -169,95 +162,7 @@ jobs:
           done
           exit 1
 
-      # jsDelivr 的 @main 跟随最新 commit,但 CDN 缓存有延迟;提交后主动 purge 立即生效。
-      # 注意:快照/日均价文件名按 UTC+8 日期键命名,purge 时也要按 UTC+8 计算。
-      - name: 刷新 jsDelivr 缓存(热点文件)
-        if: steps.commit.outputs.changed == 'true'
-        run: |
-          CN_DATE=$(TZ='Asia/Shanghai' date +%Y-%m-%d)
-          CN_YDAY=$(TZ='Asia/Shanghai' date -d 'yesterday' +%Y-%m-%d)
-          for f in \
-            "data/meta/items.json" \
-            "data/meta/latest.json" \
-            "data/table/kv-index.json" \
-            "data/table/latest.json" \
-            "data/snapshots/${CN_DATE}.json" \
-            "data/daily/${CN_YDAY}.json" ; do
-            curl -s "https://purge.jsdelivr.net/gh/AdminRoc/Ws-Web-price-data@main/${f}" || true
-          done
-
-      - name: 写入 wfspeed-price EdgeOne KV
+      - name: Verify and publish price raw release pointer
         env:
           KV_WRITE_TOKEN: ${{ secrets.KV_WRITE_TOKEN }}
-        run: |
-          set -euo pipefail
-          test -n "${KV_WRITE_TOKEN}" || { echo 'Missing KV_WRITE_TOKEN'; exit 1; }
-          CN_DATE=$(python3 -c 'import json; print(json.load(open("data/meta/latest.json",encoding="utf-8"))["today"])')
-          ARTIFACT_DIR="$RUNNER_TEMP/price-snapshot-kv"
-          python3 scripts/snapshot_kv_shards.py "data/snapshots/${CN_DATE}.json" data/meta/latest.json "$ARTIFACT_DIR"
-          publish() {
-            local key="$1"
-            local file="$2"
-            local payload="/tmp/${key}.json"
-            test -f "$file" || { echo "Missing $file"; return 1; }
-            python3 - "$key" "$file" "$payload" <<'PY'
-          import json, pathlib, sys
-          key, source, target = sys.argv[1:]
-          value = pathlib.Path(source).read_text(encoding='utf-8')
-          json.loads(value)
-          pathlib.Path(target).write_text(json.dumps({'key': key, 'value': value}, ensure_ascii=False), encoding='utf-8')
-          PY
-            curl --silent --show-error --fail-with-body --retry 8 --retry-all-errors \
-              --retry-delay 20 --retry-max-time 300 --max-time 60 \
-              -X POST 'https://price.wfspeed.run/api/update-kv' \
-              -H "Authorization: Bearer ${KV_WRITE_TOKEN}" \
-              -H 'Content-Type: application/json' --data-binary "@$payload"
-            python3 - "$key" "$file" <<'PY'
-          import hashlib, sys, urllib.request
-          key, source = sys.argv[1:]
-          expected = open(source, 'rb').read()
-          verify = hashlib.sha256(expected).hexdigest()
-          with urllib.request.urlopen('https://price.wfspeed.run/api/kv?key=' + key + '&verify=' + verify, timeout=60) as response:
-              actual = response.read()
-          if hashlib.sha256(actual).digest() != hashlib.sha256(expected).digest():
-              raise SystemExit('readback hash mismatch for ' + key)
-          PY
-            rm -f "$payload"
-          }
-          # Prune only expired keys under the dedicated shard prefix, then
-          # enforce a bounded 128 MiB snapshot-storage budget before writes.
-          curl --silent --show-error --fail-with-body --retry 3 \
-            --retry-delay 5 --max-time 60 \
-            -X POST 'https://price.wfspeed.run/api/update-kv' \
-            -H "Authorization: Bearer ${KV_WRITE_TOKEN}" \
-            -H 'Content-Type: application/json' --data-binary "@$ARTIFACT_DIR/price_snapshot_prepare.json"
-          # The legacy price_items key remains as a bounded fallback. Readers
-          # switch only after all fixed catalog parts and their manifest verify.
-          ITEM_ARTIFACT_DIR="$RUNNER_TEMP/price-item-catalog-kv"
-          for part in "$ITEM_ARTIFACT_DIR"/price_items_chunk_*.json; do
-            key="$(basename "$part" .json)"
-            publish "$key" "$part"
-          done
-          publish price_items_manifest "$ITEM_ARTIFACT_DIR/price_items_manifest.json"
-          publish price_model_config data/meta/model-config.json
-          # Match only content-addressed data shards. The similarly prefixed
-          # price_snapshot_prepare.json is an API control request, not a KV shard.
-          for part in "$ARTIFACT_DIR"/price_snapshot_????????_???_???_????????????????.json; do
-            test -f "$part" || { echo 'No canonical snapshot shard artifacts found'; exit 1; }
-            key="$(basename "$part" .json)"
-            [[ "$key" =~ ^price_snapshot_[0-9]{8}_[0-9]{3}_[0-9]{3}_[a-f0-9]{16}$ ]] || {
-              echo 'Unexpected snapshot shard artifact name; refusing KV publication' >&2
-              exit 1
-            }
-            publish "$key" "$part"
-          done
-          # The manifest switches consumers to the full set of verified,
-          # individually bounded batch shards; publish it only after every shard.
-          publish price_today_snapshots_manifest "$ARTIFACT_DIR/price_today_snapshots_manifest.json"
-          publish price_table_index data/table/kv-index.json
-          for part in data/table/kv/*.json; do
-            key="price_table_chunk_$(basename "$part" .json)"
-            publish "$key" "$part"
-          done
-          # Meta is published last and therefore acts as the ready marker for the frontend.
-          publish price_meta data/meta/latest.json
+        run: python3 scripts/publish_release_pointer.py

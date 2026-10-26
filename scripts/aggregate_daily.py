@@ -37,8 +37,6 @@ SNAPSHOTS_DIR = os.path.join(DATA_DIR, "snapshots")
 DAILY_DIR = os.path.join(DATA_DIR, "daily")
 SERIES_DIR = os.path.join(DATA_DIR, "series")
 TABLE_OUT = os.path.join(DATA_DIR, "table", "latest.json")
-TABLE_KV_DIR = os.path.join(DATA_DIR, "table", "kv")
-TABLE_KV_INDEX = os.path.join(DATA_DIR, "table", "kv-index.json")
 META_OUT = os.path.join(DATA_DIR, "meta", "latest.json")
 ITEMS_IN = os.path.join(DATA_DIR, "meta", "items.json")
 
@@ -48,7 +46,6 @@ SNAPSHOT_RETENTION_DAYS = 7
 DAILY_RETENTION_DAYS = 1000
 SERIES_RETENTION_DAYS = 1000
 TABLE_MAX_DAYS = 180   # 表格 MA90 + chg90(双窗口)所需上限
-TABLE_KV_CHUNK_SIZE = 200
 
 # 预测模型参数(与站点 js/model-config.js 保持一致)
 SHORT_WINDOWS = (3, 14)
@@ -461,45 +458,8 @@ def build_table_bundle(items_meta):
         "items": items,
     }
     save_json(TABLE_OUT, bundle)
-    write_table_kv_chunks(bundle)
     print(f"  [bundle] → {TABLE_OUT} ({len(items)} 物品)")
     return bundle
-
-
-def write_table_kv_chunks(bundle):
-    """将大表拆成稳定小分片，避免 Action 经 Edge Function 写 KV 时超过请求体限制。"""
-    os.makedirs(TABLE_KV_DIR, exist_ok=True)
-    for name in os.listdir(TABLE_KV_DIR):
-        if name.endswith(".json"):
-            os.remove(os.path.join(TABLE_KV_DIR, name))
-    slugs = sorted((bundle.get("items") or {}).keys())
-    chunks = []
-    for index, start in enumerate(range(0, len(slugs), TABLE_KV_CHUNK_SIZE)):
-        key = f"price_table_chunk_{index:03d}"
-        items = {slug: bundle["items"][slug] for slug in slugs[start:start + TABLE_KV_CHUNK_SIZE]}
-        doc = {
-            "schema_version": bundle["schema_version"],
-            "data_revision": bundle["data_revision"],
-            "model_version": bundle["model_version"],
-            "generated": bundle["generated"],
-            "tz": bundle["tz"],
-            "day": bundle["day"],
-            "last_daily": bundle["last_daily"],
-            "items": items,
-        }
-        path = os.path.join(TABLE_KV_DIR, f"{index:03d}.json")
-        save_json(path, doc)
-        chunks.append({"key": key, "file": f"kv/{index:03d}.json", "count": len(items)})
-    save_json(TABLE_KV_INDEX, {
-        "schema_version": bundle["schema_version"],
-        "data_revision": bundle["data_revision"],
-        "model_version": bundle["model_version"],
-        "generated": bundle["generated"],
-        "tz": bundle["tz"],
-        "day": bundle["day"],
-        "last_daily": bundle["last_daily"],
-        "chunks": chunks,
-    })
 
 
 # ── 5. 元数据 ──────────────────────────────────────────────────────────

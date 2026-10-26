@@ -1,11 +1,7 @@
-name: Publish current price data to EdgeOne KV
+name: Publish verified price raw release pointer
 
 on:
   workflow_dispatch:
-    inputs:
-      confirm:
-        description: Type PUBLISH to write the current committed plaintext data to wfspeed-price KV.
-        required: true
 
 concurrency:
   group: price-data
@@ -13,54 +9,20 @@ concurrency:
 
 jobs:
   publish:
-    if: inputs.confirm == 'PUBLISH'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v5
+      - name: Checkout current committed data
+        uses: actions/checkout@v5
         with:
+          fetch-depth: 0
           ref: main
-      - name: Validate and publish current plaintext data
+
+      - name: Verify release manifest without changing data
+        run: python3 scripts/build_release_manifest.py --verify
+
+      - name: Verify pinned raw files and publish the small pointer
         env:
           KV_WRITE_TOKEN: ${{ secrets.KV_WRITE_TOKEN }}
-        run: |
-          set -euo pipefail
-          test -n "${KV_WRITE_TOKEN}" || { echo 'Missing KV_WRITE_TOKEN'; exit 1; }
-          publish() {
-            local key="$1"
-            local file="$2"
-            local payload="/tmp/${key}.json"
-            test -f "$file" || { echo "Missing $file"; return 1; }
-            python3 - "$key" "$file" "$payload" <<'PY'
-          import json, pathlib, sys
-          key, source, target = sys.argv[1:]
-          value = pathlib.Path(source).read_text(encoding='utf-8')
-          data = json.loads(value)
-          if isinstance(data, dict) and data.get('ct'):
-              raise SystemExit(source + ' is still encrypted')
-          pathlib.Path(target).write_text(json.dumps({'key': key, 'value': value}, ensure_ascii=False), encoding='utf-8')
-          PY
-            curl --silent --show-error --fail-with-body --retry 8 --retry-all-errors \
-              --retry-delay 20 --retry-max-time 300 --max-time 60 \
-              -X POST 'https://price.wfspeed.run/api/update-kv' \
-              -H "Authorization: Bearer ${KV_WRITE_TOKEN}" \
-              -H 'Content-Type: application/json' --data-binary "@$payload"
-            python3 - "$key" "$file" <<'PY'
-          import hashlib, sys, urllib.request
-          key, source = sys.argv[1:]
-          expected = open(source, 'rb').read()
-          with urllib.request.urlopen('https://price.wfspeed.run/api/kv?key=' + key, timeout=60) as response:
-              actual = response.read()
-          if hashlib.sha256(actual).digest() != hashlib.sha256(expected).digest():
-              raise SystemExit('readback hash mismatch for ' + key)
-          PY
-            rm -f "$payload"
-          }
-          CN_DATE=$(python3 -c 'import json; print(json.load(open("data/meta/latest.json",encoding="utf-8"))["today"])')
-          publish price_items data/meta/items.json
-          publish price_model_config data/meta/model-config.json
-          publish price_today_snapshots "data/snapshots/${CN_DATE}.json"
-          publish price_table_index data/table/kv-index.json
-          for part in data/table/kv/*.json; do
-            publish "price_table_chunk_$(basename "$part" .json)" "$part"
-          done
-          publish price_meta data/meta/latest.json
+        run: python3 scripts/publish_release_pointer.py

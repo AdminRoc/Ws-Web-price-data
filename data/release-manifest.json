@@ -1,0 +1,58 @@
+{
+  "data_revision": "40382818678",
+  "files": {
+    "meta/items.json": {
+      "bytes": 997858,
+      "sha256": "5390d29d3b527214bd3633cf9bda2aaf52035635ab72e20c78634269fcd773b8"
+    },
+    "meta/latest.json": {
+      "bytes": 460,
+      "sha256": "dda65fb5c432e63336212f4e9e96fdd0383a507a98c0585eb160fbe8e2805e1f"
+    },
+    "meta/model-config.json": {
+      "bytes": 292,
+      "sha256": "b1ec69c81f88b933b5d43402bea7f3dd2e2898b8868c15171459e92c0aaaae57"
+    },
+    "meta/wm-identities.json": {
+      "bytes": 179738,
+      "sha256": "8c8e332643b2fd7f290a9064cdf4263db1319226d158defbd1fc610c9300e666"
+    },
+    "snapshots/2026-10-27.json": {
+      "bytes": 2021288,
+      "sha256": "fdd4b2c748774cb937b4b0f8321bdb380730ff7ce11011843d9228f68f76cc4c"
+    },
+    "table/latest.json": {
+      "bytes": 4428175,
+      "sha256": "89866db4e55ead8c113a9dc2622c073ec72eeec05613ff63731ea83f428b6b5a"
+    }
+  },
+  "generated": "2026-10-26T19:22:50Z",
+  "indexes": {
+    "daily": {
+      "bytes": 7666,
+      "file_count": 65,
+      "path": "release/daily-index.json",
+      "sha256": "e8d13608b4a5fabe3532aa00b2107ae178cd5a1d3a2c7341baa9e58f5b094c44"
+    },
+    "series": {
+      "bytes": 475056,
+      "file_count": 3888,
+      "path": "release/series-index.json",
+      "sha256": "ab563228b71db7b7874888ce48f4876c5fa3d1e9181697888bf5d66398793944"
+    },
+    "snapshots": {
+      "bytes": 793,
+      "file_count": 6,
+      "path": "release/snapshots-index.json",
+      "sha256": "e4adb95b2d36b48eef466ef74bc624fcb31f5f476c01a86d67e1a1ae8728c719"
+    }
+  },
+  "repository": "AdminRoc/Ws-Web-price-data",
+  "retention": {
+    "daily": 65,
+    "series": 3888,
+    "snapshots": 6
+  },
+  "schema_version": 1,
+  "today": "2026-10-27"
+}
