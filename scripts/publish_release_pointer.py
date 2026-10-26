@@ -9,6 +9,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import socket
 from pathlib import Path
 
 
@@ -22,10 +23,20 @@ def sha(raw):
     return hashlib.sha256(raw).hexdigest()
 
 
-def get(url, timeout=45):
+def get(url, timeout=45, attempts=4, delay=2):
     request = urllib.request.Request(url, headers={"Cache-Control": "no-store", "Pragma": "no-cache"})
-    with urllib.request.urlopen(request, timeout=timeout) as response:
-        return response.read()
+    for attempt in range(attempts):
+        try:
+            with urllib.request.urlopen(request, timeout=timeout) as response:
+                return response.read()
+        except urllib.error.HTTPError as error:
+            if error.code < 500 or attempt + 1 == attempts:
+                raise
+        except (urllib.error.URLError, TimeoutError, socket.timeout):
+            if attempt + 1 == attempts:
+                raise
+        time.sleep(delay * (attempt + 1))
+    raise RuntimeError("unreachable GET retry state")
 
 
 def current_pointer():
@@ -36,6 +47,24 @@ def current_pointer():
         if error.code == 404:
             return None
         raise
+
+
+def verify_pointer_after_write(expected, attempts=5, delay=2):
+    for attempt in range(attempts):
+        try:
+            actual = current_pointer()
+        except urllib.error.HTTPError as error:
+            if error.code < 500 or attempt + 1 == attempts:
+                raise
+        except (urllib.error.URLError, TimeoutError, socket.timeout):
+            if attempt + 1 == attempts:
+                raise
+        else:
+            if actual == expected:
+                return
+        if attempt + 1 < attempts:
+            time.sleep(delay * (attempt + 1))
+    raise SystemExit("Price release pointer readback mismatch after bounded verification")
 
 
 def main():
@@ -113,9 +142,7 @@ def main():
             response.read()
     except Exception as error:
         print("Pointer write response was inconclusive; checking readback without replay: " + type(error).__name__, file=sys.stderr)
-    actual = current_pointer()
-    if actual != pointer:
-        raise SystemExit("Price release pointer readback does not match the verified release")
+    verify_pointer_after_write(pointer)
     print(f"PRICE RELEASE POINTER OK commit={commit} data_revision={pointer['data_revision']} files_checked={len(critical)}")
 
 
