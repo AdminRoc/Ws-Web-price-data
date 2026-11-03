@@ -1,13 +1,13 @@
 {
-  "data_revision": "41623894134",
+  "data_revision": "41640454854",
   "files": {
     "meta/items.json": {
       "bytes": 998093,
-      "sha256": "c10fb3967d7c567416cfd871463e1cc5d54d8b96d055dcb70f1a829848d394e4"
+      "sha256": "30be0c640bc3b2a02d13baa6fca8b1260f375c0e050225b728dfe897f7eaad5c"
     },
     "meta/latest.json": {
       "bytes": 461,
-      "sha256": "d06ad8729aed8c6418a569b3213328b805c3861cf0794761abe5d00eaf6432fd"
+      "sha256": "b2d1b326d6c6f12eed8fe3bed52a373340d4957463050505efd54c0f48fb9115"
     },
     "meta/model-config.json": {
       "bytes": 292,
@@ -18,33 +18,33 @@
       "sha256": "aae5c64d744bafb813e141fb54fcd96d92e6762bc1dbe1d1a3dc1b2831863beb"
     },
     "snapshots/2026-11-03.json": {
-      "bytes": 4971580,
-      "sha256": "6bf98feadf42201af87dcc6d5ac89191a7f9021656e297b0dc6df0829a243311"
+      "bytes": 5467984,
+      "sha256": "c43821573492cd03aa8dc23bcf395f5374ff90c65e0bed3c392480d9ed4d4763"
     },
     "table/latest.json": {
-      "bytes": 4424179,
-      "sha256": "ad60d4b02896d9e04419b6bb7502038d45b9f03178dc37067dc9e50d5167e917"
+      "bytes": 4426866,
+      "sha256": "496ae0686b3e3818874b27e22de7c4e651702e26a0b201cecf23091794951f88"
     }
   },
-  "generated": "2026-11-03T11:24:59Z",
+  "generated": "2026-11-03T13:24:57Z",
   "indexes": {
     "daily": {
       "bytes": 8485,
       "file_count": 72,
       "path": "release/daily-index.json",
-      "sha256": "34615bb34fbb9acfa10ea0a84886c906fcee627b31bb65dcdcee21bad69c045d"
+      "sha256": "acec77bc72cdfcac51225fde58ba6469296aeb9d824773a0d207e023c2413fe9"
     },
     "series": {
       "bytes": 475175,
       "file_count": 3889,
       "path": "release/series-index.json",
-      "sha256": "44f4e650630fc4491a864c0bacfd7ddc0543ec2a1079764474490041fa849b51"
+      "sha256": "3e5480dcd481c269d0989c5311b148c51a8983aada275d50f4b46945a29350a7"
     },
     "snapshots": {
       "bytes": 1037,
       "file_count": 8,
       "path": "release/snapshots-index.json",
-      "sha256": "536122f9dc223502748e92f3341f9bdc76f0da75e2d7e0cef4d06f1a250fe9fb"
+      "sha256": "052535e55e0eac0e6d84d16e5576c7ca7b4321535d8757cf444301fcc47a86e7"
     }
   },
   "repository": "AdminRoc/Ws-Web-price-data",
