@@ -61,10 +61,10 @@ DIRECT_URL = "https://api.warframe.market"
 # 速率策略(遵守 wfm-docs 官方文档规则 — How-To-Design-The-UI/wfm-docs/docs/rules/overview.md):
 #   "The general public API limit is 3 requests per second."
 # - 全局令牌式限速器强制 ≤3 req/s(无论并发多少,请求"发起"速率恒定 ≤3/s);
-# - 并发 8 仅用于容忍慢响应(在途请求数),不提高请求发起速率;
+# - 单个在途请求,严格串行访问 WM,避免并发连接;
 # - 全量 3837 物品理论最短耗时 ≈ 3837/3 ≈ 21 分钟,预算 35 分钟留足重试余量;
 # - 自适应限速仍保留:失败率高时进一步加大间隔,恢复后回落。
-CONCURRENCY = int(os.environ.get("CONCURRENCY", "8"))
+CONCURRENCY = 1
 MAX_RPS = float(os.environ.get("MAX_RPS", "3.0"))   # wfm-docs 规定的公共 API 限速
 STARTUP_JITTER_MAX = 180  # 3min,错峰
 BATCH_SIZE = 50
@@ -432,7 +432,7 @@ async def main():
     # maxRank>0 才是真正可分级物品(mod/arcane 等),用于 avg_zero/avg_max 拆分
     max_ranks = {it["slug"]: (it.get("maxRank") or 0) for it in items}
     est = len(slugs) / MAX_RPS / 60
-    print(f"共 {len(slugs)} 个物品,并发={CONCURRENCY},限速 {MAX_RPS} req/s(wfm-docs 规则),"
+    print(f"共 {len(slugs)} 个物品,串行请求,限速 {MAX_RPS} req/s(wfm-docs 规则),"
           f"预估 {est:.1f} 分钟,预算 {RUN_TIME_BUDGET/60:.0f} 分钟", flush=True)
 
     results = {}

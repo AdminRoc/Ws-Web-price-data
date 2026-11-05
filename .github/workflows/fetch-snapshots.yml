@@ -1,8 +1,7 @@
 name: 抓取快照并聚合日均价
 
-# 正常情况下每 2 小时(UTC 第 15 分)运行一次；同一时刻 :45 另有一次
-# stale-only 兜底。GitHub schedule 与明确标记的 Cloudflare hourly fallback 都使用同一
-# 90 分钟完整抓取+PRICE_KV读回成功门槛；普通手动 workflow_dispatch 仍可强制运行。
+# 由 Core Worker 按全局串行队列最短每 4 小时调度；同一
+# 90 分钟完整抓取+PRICE_KV读回成功门槛仍保护重复采样；普通手动 workflow_dispatch 仍可运行。
 #   1) 抓取全量均价快照 → 追加进当日批次文件 data/snapshots/YYYY-MM-DD.json
 #   2) 聚合前一日(UTC+8)日均价 → data/daily/ + data/series/(幂等,每天只会真正聚合一次)
 #   3) 重建表格 bundle(data/table/latest.json,含今日临时均价与预测)+ meta
@@ -18,14 +17,10 @@ on:
         required: false
         default: false
       cf_schedule_fallback:
-        description: Mark as the hourly Cloudflare schedule fallback
+        description: Mark as a Core serial-scheduler dispatch
         type: boolean
         required: false
         default: false
-  schedule:
-    - cron: "15 */2 * * *" # 每 2 小时第 15 分(UTC);脚本内另有 0~3min 随机延迟错峰
-    - cron: "45 * * * *" # 每小时 stale-only 兜底；下方完整成功发布年龄门控避免重复采样
-
 concurrency:
   group: price-data
   cancel-in-progress: false
@@ -94,6 +89,10 @@ jobs:
         env:
           # Legacy read-only compatibility until the one-time plaintext migration finishes.
           PRICE_DATA_SECRET: ${{ secrets.PRICE_DATA_SECRET }}
+
+      - name: Build complete current item-average artifact
+        if: ${{ github.event.inputs.publish_existing != 'true' }}
+        run: python3 scripts/build_item_averages.py
 
       - name: Build release manifest and lazy history indexes
         if: ${{ github.event.inputs.publish_existing != 'true' }}
