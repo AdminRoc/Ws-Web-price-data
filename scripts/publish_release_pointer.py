@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Verify a pushed price release and publish only its small EdgeOne KV pointer."""
+import base64
 import hashlib
 import json
 import os
@@ -62,9 +63,89 @@ def verify_pointer_after_write(expected, attempts=5, delay=2):
         else:
             if actual == expected:
                 return
+            if actual and actual.get("snapshot"):
+                snapshot = dict(actual["snapshot"])
+                snapshot.pop("switched_at", None)
+                if dict(actual, snapshot=snapshot) == expected:
+                    return
         if attempt + 1 < attempts:
             time.sleep(delay * (attempt + 1))
     raise SystemExit("Price release pointer readback mismatch after bounded verification")
+
+
+CHUNK_BYTES = 512 * 1024
+SLOT_CHUNKS = 64
+
+
+def snapshot_url(commit, slot, start, count):
+    return ENDPOINT + "/api/release-artifact?" + urllib.parse.urlencode(
+        {"revision": commit, "slot": slot, "start": start, "count": count}
+    )
+
+
+def stage_snapshot(commit, previous, payloads, token):
+    active = (previous or {}).get("snapshot") or {}
+    slot = "b" if active.get("slot") == "a" else "a"
+    files = {}
+    chunks = []
+    for path, raw in payloads.items():
+        parts = [raw[offset:offset + CHUNK_BYTES] for offset in range(0, len(raw), CHUNK_BYTES)]
+        if not 1 <= len(parts) <= 16:
+            raise SystemExit("price snapshot file exceeds its supported size: " + path)
+        files[path] = {"start": len(chunks), "count": len(parts), "sha256": sha(raw)}
+        chunks.extend(parts)
+    if len(chunks) > SLOT_CHUNKS:
+        raise SystemExit("price snapshot exceeds the fixed two-slot KV budget")
+    def stage_chunk(index, chunk):
+        url = snapshot_url(commit, slot, index, 1)
+        try:
+            if get(url + "&v=" + str(time.time_ns()), attempts=4) == chunk:
+                return
+        except urllib.error.HTTPError as error:
+            if error.code != 404:
+                raise
+        request = urllib.request.Request(url, data=base64.b64encode(chunk), method="POST",
+            headers={"Authorization": "Bearer " + token, "Content-Type": "text/plain"})
+        for attempt in range(3):
+            try:
+                with urllib.request.urlopen(request, timeout=30) as response:
+                    response.read()
+                break
+            except (urllib.error.URLError, TimeoutError) as error:
+                code = getattr(error, "code", None)
+                if code in (400, 401, 403, 409, 413):
+                    raise
+                print(f"Chunk {index} write response inconclusive ({code}); verifying before any retry", file=sys.stderr)
+                time.sleep(5)
+                try:
+                    if get(url + "&v=" + str(time.time_ns()), attempts=4) == chunk:
+                        break
+                except urllib.error.HTTPError as read_error:
+                    if read_error.code != 404:
+                        raise
+                if attempt == 2 or current_pointer() != previous:
+                    raise SystemExit("KV chunk readback mismatch") from error
+    for index, chunk in enumerate(chunks):
+        stage_chunk(index, chunk)
+    for path, raw in payloads.items():
+        file = files[path]
+        url = snapshot_url(commit, slot, file["start"], file["count"])
+        for attempt in range(7):
+            try:
+                actual = get(url + "&v=" + str(time.time_ns()), attempts=1)
+                if len(actual) == len(raw) and sha(actual) == file["sha256"]:
+                    break
+            except (urllib.error.URLError, TimeoutError):
+                pass
+            if attempt == 6:
+                raise SystemExit("KV snapshot readback mismatch: " + path)
+            time.sleep(11)
+            if attempt in (2, 4):
+                if current_pointer() != previous:
+                    raise SystemExit("Active price pointer changed during repair")
+                for index in range(file["start"], file["start"] + file["count"]):
+                    stage_chunk(index, chunks[index])
+    return {"slot": slot, "files": files}
 
 
 def main():
@@ -88,6 +169,7 @@ def main():
     if sha(remote_manifest) != sha(manifest_raw):
         raise SystemExit("Pinned raw manifest differs from the pushed release")
 
+    payloads = {MANIFEST_PATH: manifest_raw}
     critical = set(manifest.get("files", {}))
     critical.update(ref["path"] for ref in manifest.get("indexes", {}).values())
     for relative in sorted(critical):
@@ -99,6 +181,7 @@ def main():
         raw = get(raw_base + urllib.parse.quote(relative, safe="/._-"))
         if len(raw) != entry["bytes"] or sha(raw) != entry["sha256"]:
             raise SystemExit("Pinned raw readback hash mismatch: " + relative)
+        payloads[relative] = raw
 
     latest = json.loads((ROOT / "data/meta/latest.json").read_text(encoding="utf-8"))
     if str(latest.get("data_revision")) != str(manifest.get("data_revision")):
@@ -127,6 +210,22 @@ def main():
     else:
         pointer["previous_commit_sha"] = None
 
+    previous = previous
+    if previous and previous.get("snapshot") and previous.get("manifest_sha256") == pointer["manifest_sha256"]:
+        print("Verified snapshot manifest is already current")
+        return
+    if previous and previous.get("snapshot"):
+        elapsed = time.time() - previous["snapshot"]["switched_at"] / 1000
+        if elapsed < 180:
+            time.sleep(min(185, 182 - elapsed))
+    if current_pointer() != previous:
+        raise SystemExit("Active pointer changed before staging")
+    pointer["snapshot"] = stage_snapshot(commit, previous, payloads, token)
+    if current_pointer() != previous:
+        raise SystemExit("Active pointer changed during staging")
+    remote = subprocess.check_output(["git", "ls-remote", "origin", "refs/heads/main"], cwd=ROOT, text=True).split()
+    if not remote or remote[0].lower() != commit.lower():
+        raise SystemExit("Candidate is no longer the remote main")
     value = json.dumps(pointer, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     if len(value.encode("utf-8")) > 65536:
         raise SystemExit("Release pointer exceeds the 64 KiB bound")
