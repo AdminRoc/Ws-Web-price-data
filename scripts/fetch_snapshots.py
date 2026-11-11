@@ -13,7 +13,7 @@
 
 速率(遵守 wfm-docs 官方规则,How-To-Design-The-UI/wfm-docs/docs/rules/overview.md):
   - 公共 API 限速 3 req/s:全局 RateLimiter 强制,任意窗口请求发起速率 ≤3/s;
-  - 并发 8 仅容忍慢响应,不提高请求发起速率。
+  - 单个在途请求,严格串行访问。
 
 产物:
   - data/snapshots/{UTC+8当日}.json —— 每日一个文件,内含 batches 数组,本次追加一个批次:
@@ -22,7 +22,7 @@
 
 抗劣化设计(2026-08-19 实测 WM 间歇性慢响应后加固):
   - Retry-After 优先(429/509 按响应头等待);
-  - 退避封顶 30s;单物品最多 4 次尝试;
+  - 本地指数退避封顶 30s;服务器要求更久时完整等待;单物品最多 4 次尝试;
   - 自适应限速:滚动窗口失败率 >50% 时自动加大请求间隔,恢复后回落;
   - 总时间预算 RUN_TIME_BUDGET:到期中断本批,提交已抓到的部分批次(宁可部分,不可空跑);
   - 未抓到的物品不写入批次(由聚合侧按实际样本统计)。
@@ -38,12 +38,14 @@
 """
 import asyncio
 import json
+import math
 import os
 import random
 import sys
 import time
 from collections import deque
 from datetime import datetime, timezone, timedelta
+from email.utils import parsedate_to_datetime
 from urllib.parse import quote
 
 from item_identity import (
@@ -169,14 +171,22 @@ def load_json(path, default=None):
 
 
 def _backoff(attempt, resp=None):
+    delay = min((2 ** attempt) * 5, BACKOFF_CAP)
     if resp is not None:
+        retry_after = resp.headers.get("Retry-After", "")
         try:
-            ra = int(resp.headers.get("Retry-After", "0"))
-            if ra > 0:
-                return min(ra + random.random() * 2, 120)
-        except Exception:
-            pass
-    return min((2 ** attempt) * 5, BACKOFF_CAP) + random.random() * 2
+            server_delay = float(retry_after)
+        except (TypeError, ValueError):
+            try:
+                retry_at = parsedate_to_datetime(retry_after)
+                if retry_at.tzinfo is None:
+                    retry_at = retry_at.replace(tzinfo=timezone.utc)
+                server_delay = retry_at.timestamp() - time.time()
+            except (TypeError, ValueError, OverflowError):
+                server_delay = 0
+        if math.isfinite(server_delay):
+            delay = max(delay, server_delay)
+    return delay + random.random() * 2
 
 
 def calc_avg(orders, rank=None, order_type="sell"):

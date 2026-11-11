@@ -79,6 +79,9 @@ jobs:
       - name: Test complete item-average artifact preservation
         run: python3 -m unittest discover -s tests -p 'test_build_item_averages.py' -v
 
+      - name: Test server-directed retry delays before WM requests
+        run: python3 -m unittest discover -s tests -p 'test_fetch_snapshot_retry_after.py' -v
+
       - name: 抓取全量快照
         if: ${{ github.event.inputs.publish_existing != 'true' }}
         run: python3 scripts/fetch_snapshots.py
