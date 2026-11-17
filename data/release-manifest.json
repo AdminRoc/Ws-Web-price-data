@@ -1,17 +1,17 @@
 {
-  "data_revision": "43942760525",
+  "data_revision": "43984149188",
   "files": {
     "meta/item-averages.json": {
-      "bytes": 502520,
-      "sha256": "0aefb813e7cf9b1b38fa827cb5e5ff544471a9e90d9889834d22dfe8ee321b7b"
+      "bytes": 504999,
+      "sha256": "8c0aea0d785481d79c9b6e5f5c3272592c91f8e0613b23142768e7acd34e2842"
     },
     "meta/items.json": {
       "bytes": 998093,
-      "sha256": "47dd044035ccc37ff1b437fec8a56bb1507217b906520c672a96c920d9f62986"
+      "sha256": "331ba5f4697aa6a023c1f9ce217de74ecbbfbe0f08c92cc96e6543d94a7c5fa3"
     },
     "meta/latest.json": {
       "bytes": 460,
-      "sha256": "96c43d4a47ebe54fa8b94eca53911ceab8790844ee85e7b507c6316fd762eddd"
+      "sha256": "7557b7b47f0f75b3af6c9bbbe054640642947cb8d060c12b9c27286a7c0cf973"
     },
     "meta/model-config.json": {
       "bytes": 292,
@@ -22,33 +22,33 @@
       "sha256": "aae5c64d744bafb813e141fb54fcd96d92e6762bc1dbe1d1a3dc1b2831863beb"
     },
     "snapshots/2026-11-17.json": {
-      "bytes": 490717,
-      "sha256": "13a2980df65d3c019c32bdc8bb638037cdad6450e0331b1a96fdb3d46ed2ceda"
+      "bytes": 985352,
+      "sha256": "6b37f78a34f708391787dedc8291318bce009e54911b4be19fd17559eca568b7"
     },
     "table/latest.json": {
-      "bytes": 4421462,
-      "sha256": "332a3e71f856ba2259109c3318ce8be2917b68af8c3128b786aea214fb855774"
+      "bytes": 4420721,
+      "sha256": "116d8a26ea85774c2b9ac8d6d092437b8838f5ce5e44091ae88b6b5663b6b689"
     }
   },
-  "generated": "2026-11-16T20:10:51Z",
+  "generated": "2026-11-17T00:25:46Z",
   "indexes": {
     "daily": {
       "bytes": 10123,
       "file_count": 86,
       "path": "release/daily-index.json",
-      "sha256": "cded9358613e2b9d9186365c282e49d1c276cef17e80a7e2911470baa37b119d"
+      "sha256": "2dab8ad73e6e879fdeae9647a9ac0f4e25cee201b34170f0910ca9be5fa004bc"
     },
     "series": {
       "bytes": 475178,
       "file_count": 3889,
       "path": "release/series-index.json",
-      "sha256": "bc4c247f612d6e18d00599812b1446dda44beed9ce90426bdf2f302d4f8479b6"
+      "sha256": "12459cc95e290bb3885d137f4f3f5a9e82cb106676fc036d3830e121478b5976"
     },
     "snapshots": {
       "bytes": 1036,
       "file_count": 8,
       "path": "release/snapshots-index.json",
-      "sha256": "b9153cc016d2171459361ca4079c8683f0c2cf37a0e87a9d77697ac81d746350"
+      "sha256": "a8526f64f2cbb6fd90101b96d71be48be933fa6dc5830243a7cf305101db02bb"
     }
   },
   "repository": "AdminRoc/Ws-Web-price-data",
